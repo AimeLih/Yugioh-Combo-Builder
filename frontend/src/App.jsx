@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import { activationSummonRestrictions, summonRestrictionReason } from './summonRestrictions.js'
 import { effectSourceZone } from './effectSourceZone.js'
+import { effectNeedsPrerequisiteCheck, specialSummonsSelfFromZone } from './effectResolution.js'
+import { splitCardEffects } from './effectParsing.js'
 
 function typeColor(type) {
   if (!type) return '#1a3a5c'
@@ -435,10 +437,7 @@ function cardEffectOptions(card, zone = null, entry = null) {
     ]
   }
 
-  const options = sections.flatMap(section => section.text
-      .split(/(?<=[.!?])\s+(?=[A-Z"[])|\n+/)
-      .map(text => text.trim())
-      .filter(text => text.length > 0)
+  const options = sections.flatMap(section => splitCardEffects(section.text)
       .filter(text => !/^[●•▪◦-]\s*/.test(text))
       .filter(text => !/^you can only (?:use|activate)\b/i.test(text))
       .filter(text => !/^you cannot special summon\b/i.test(text))
@@ -479,10 +478,12 @@ function onSummonEffectOptions(card, entry) {
 }
 
 function canActivateFromZone(entry, zone) {
-  const text = (entry.card.description || '').toLowerCase()
+  const effects = cardEffectOptions(entry.card, zone, entry)
+  if (effects.length === 0) return false
   const reason = entry.moveReason || ''
   if (zone === 'graveyard') {
-    return text.split(/(?<=\.)\s+|\n+/).some(effect => {
+    return effects.some(effectOption => {
+      const effect = effectOption.text.toLowerCase()
       if (/destroyed(?: by battle| by card effect)? and sent to (?:the |your )?(?:gy|graveyard)/.test(effect)) {
         return reason === 'destroy'
       }
@@ -495,21 +496,17 @@ function canActivateFromZone(entry, zone) {
       if (/used as fusion material/.test(effect)) {
         return reason === 'fusion-material'
       }
-      return /(?:sent to|in|from|while .* in) (?:the |your )?(?:gy|graveyard)/.test(effect)
-          || /banish (?:this card|it) from (?:the |your )?(?:gy|graveyard)/.test(effect)
+      return true
     })
   }
-  if (zone === 'banished') {
-    return /(?:if|when|while) (?:this card|it) is banished/.test(text)
-        || /(?:from|among) your banished/.test(text)
-  }
-  return cardEffectOptions(entry.card, zone, entry).length > 0
+  return true
 }
 
 function SimulatedZones({
   zones,
   activatedEffects,
   effectInteractionPending,
+  onViewCard,
   onRequestEffect,
   onOpenExtraDeckSummon,
   onOpenPendulumSummon,
@@ -565,14 +562,8 @@ function SimulatedZones({
                         <button
                             type="button"
                             className={`sim-zone-card${liveEffect ? ' live' : ''}${used ? ' used' : ''}`}
-                            onClick={() => liveEffect && !used && !effectInteractionPending
-                              && onRequestEffect(entry, zone.key)}
-                            disabled={!liveEffect || used || effectInteractionPending}
-                            title={liveEffect
-                              ? used
-                                ? 'This zone effect was already used in this route'
-                                : `Activate ${entry.card.name} from the ${zone.label}`
-                              : 'This card has no effect that activates from this zone'}
+                            onClick={() => onViewCard(entry, zone.key)}
+                            title={`View ${entry.card.name}`}
                         >
                           <span className="sim-zone-card-name">{entry.card.name}</span>
                           {['monsterZone', 'extraMonsterZone'].includes(zone.key) && isMonsterCard(entry.card) && (
@@ -592,6 +583,20 @@ function SimulatedZones({
                           )}
                         </button>
                         <div className="sim-zone-card-actions">
+                          {liveEffect && (
+                              <button
+                                  type="button"
+                                  className="activate-zone-effect"
+                                  onClick={() => !used && !effectInteractionPending
+                                    && onRequestEffect(entry, zone.key)}
+                                  disabled={used || effectInteractionPending}
+                                  title={used
+                                    ? 'This zone effect was already used in this route'
+                                    : `Activate ${entry.card.name} from the ${zone.label}`}
+                              >
+                                {used ? 'Effect Used' : 'Activate Effect'}
+                              </button>
+                          )}
                           {['monsterZone', 'extraMonsterZone', 'spellTrapZone', 'pendulumZone'].includes(zone.key)
                               && !isTokenCard(entry.card)
                               && manualPlacementZones(entry.card).includes('hand') && (
@@ -1226,6 +1231,7 @@ function CardDetail({
   summonRestrictions,
   activatedEffects,
   effectInteractionPending,
+  onViewCard,
   onRequestEffect,
   activeEffect,
   onOpenExtraDeckSummon,
@@ -1538,6 +1544,7 @@ function CardDetail({
                 zones={zones}
                 activatedEffects={activatedEffects}
                 effectInteractionPending={effectInteractionPending}
+                onViewCard={onViewCard}
                 onRequestEffect={onRequestEffect}
                 onOpenExtraDeckSummon={onOpenExtraDeckSummon}
                 onOpenPendulumSummon={onOpenPendulumSummon}
@@ -1730,6 +1737,20 @@ export default function App() {
     setExtraDeckPickerOpen(false)
     setPendulumPickerOpen(false)
     closeMaterialPicker()
+    setError(null)
+  }
+
+  function viewZoneCard(entry, zone) {
+    if (!entry || !ZONE_KEYS.includes(zone)) return
+    setComboHistory(prev => [...prev, snapshotComboState()])
+    setSelected(entry.card)
+    setSelectedEntry(entry)
+    setActiveZoneContext(zone)
+    setActiveEffect(null)
+    setComboOptions([])
+    setComboPath([entry.card])
+    setEffectSelection(null)
+    setPlacementSelection(null)
     setError(null)
   }
 
@@ -2194,14 +2215,8 @@ export default function App() {
     finishComboChoice(option, materials, destination, paymentReason)
   }
 
-  function effectNeedsPrerequisiteCheck(effect) {
-    const costClause = effect.text.split(';', 1)[0]
-    return /\b(?:discard|tribute)\b/i.test(costClause)
-        || /\b(?:fusion|synchro|xyz) summon\b/i.test(effect.text)
-  }
-
   async function effectPrerequisiteResult(card, effect, zone) {
-    if (!effectNeedsPrerequisiteCheck(effect)) {
+    if (!effectNeedsPrerequisiteCheck(effect.text)) {
       return { available: true, reason: '', legalSummonTargets: null }
     }
     const zonesPayload = Object.fromEntries(ZONE_KEYS.map(zoneName => [
@@ -2314,8 +2329,7 @@ export default function App() {
       return
     }
     if (entry
-        && zone === 'spellTrapZone'
-        && /special summon this card/i.test(effect.text)
+        && specialSummonsSelfFromZone(effect.text, zone)
         && placementCapacityReason(zones, 'monsterZone')) {
       setError('The Main Monster Zones are full, so this card cannot be Special Summoned.')
       return
@@ -2377,9 +2391,7 @@ export default function App() {
       })
       resolvedZone = 'spellTrapZone'
       setSelectedEntry(continuousTrapEntry)
-    } else if (entry
-        && zone === 'spellTrapZone'
-        && /special summon this card/i.test(effect.text)) {
+    } else if (entry && specialSummonsSelfFromZone(effect.text, zone)) {
       summonedEntry = {
         ...entry,
         card: applyOptional && optionalClause?.levelIncrease
@@ -2514,7 +2526,7 @@ export default function App() {
           )}
 
           {!loading && (
-              <div className="results-layout">
+              <div className={`results-layout${showList ? '' : ' no-card-list'}`}>
                 {showList && (
                     <div className="card-list-panel">
                       <div className="panel-label">{cards.length} results</div>
@@ -2545,6 +2557,7 @@ export default function App() {
                           summonRestrictions={summonRestrictions}
                           activatedEffects={activatedEffects}
                           effectInteractionPending={effectInteractionPending}
+                          onViewCard={viewZoneCard}
                           onRequestEffect={requestEffectActivation}
                           activeEffect={activeEffect}
                           onOpenExtraDeckSummon={() => setExtraDeckPickerOpen(true)}
