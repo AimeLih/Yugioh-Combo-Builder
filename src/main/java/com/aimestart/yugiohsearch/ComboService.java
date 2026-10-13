@@ -608,6 +608,37 @@ public class ComboService {
         String lowerCost = safeLower(costClause);
         List<String> hand = zones.getOrDefault("hand", Collections.emptyList());
 
+        Matcher controlsNamedCard = Pattern.compile(
+                "if you control (?:an? )?\"([^\"]+)\"(\\s+monsters?)?",
+                Pattern.CASE_INSENSITIVE)
+                .matcher(costClause);
+        if (controlsNamedCard.find()) {
+            String requiredName = controlsNamedCard.group(1);
+            boolean familyMatch = controlsNamedCard.group(2) != null;
+            List<String> controlledNames = Stream.concat(
+                            zones.getOrDefault("monsterZone", Collections.emptyList()).stream(),
+                            zones.getOrDefault("extraMonsterZone", Collections.emptyList()).stream())
+                    .toList();
+            Map<String, Card> controlledCards = cardRepository.findAllByNameIn(new LinkedHashSet<>(controlledNames))
+                    .stream()
+                    .collect(Collectors.toMap(
+                            card -> safeLower(card.getName()),
+                            card -> card,
+                            (first, ignored) -> first,
+                            LinkedHashMap::new));
+            boolean controlsRequiredCard = controlledNames.stream().anyMatch(name -> {
+                Card controlled = controlledCards.get(safeLower(name));
+                if (controlled == null) return name.equalsIgnoreCase(requiredName);
+                return controlled.getName().equalsIgnoreCase(requiredName)
+                        || familyMatch && (safeLower(controlled.getName()).contains(safeLower(requiredName))
+                        || safeLower(controlled.getArchetype()).contains(safeLower(requiredName)));
+            });
+            if (!controlsRequiredCard) {
+                return "This effect requires you to control "
+                        + (familyMatch ? "a \"" + requiredName + "\" monster." : "\"" + requiredName + "\".");
+            }
+        }
+
         if (lowerCost.contains("discard this card")) {
             return "hand".equalsIgnoreCase(sourceZone)
                     ? ""
@@ -629,6 +660,34 @@ public class ComboService {
             }
         }
 
+        Matcher reveal = Pattern.compile(
+                "reveal\\s+(\\d+|one|a)\\s+(.+?)\\s+(?:in|from)\\s+your hand(?:$|[;,.])",
+                Pattern.CASE_INSENSITIVE)
+                .matcher(costClause);
+        if (reveal.find()) {
+            int required = wordCount(reveal.group(1));
+            String requirement = reveal.group(2).trim();
+            Set<String> uniqueHandNames = new LinkedHashSet<>(hand);
+            Map<String, Card> handCards = cardRepository.findAllByNameIn(uniqueHandNames).stream()
+                    .collect(Collectors.toMap(
+                            card -> safeLower(card.getName()),
+                            card -> card,
+                            (first, ignored) -> first,
+                            LinkedHashMap::new));
+            long available = hand.stream()
+                    .filter(name -> {
+                        Card candidate = handCards.get(safeLower(name));
+                        return candidate != null && matchesRevealRequirement(candidate, requirement);
+                    })
+                    .filter(name -> !safeLower(requirement).contains("other")
+                            || !name.equalsIgnoreCase(source.getName()))
+                    .count();
+            if (available < required) {
+                return "This effect requires revealing " + required + " " + requirement
+                        + (required == 1 ? "" : "s") + " in the Hand.";
+            }
+        }
+
         Matcher tribute = Pattern.compile("tribute\\s+(\\d+|one|a)\\s+(?:other\\s+)?monsters?", Pattern.CASE_INSENSITIVE)
                 .matcher(costClause);
         if (tribute.find()) {
@@ -642,6 +701,26 @@ public class ComboService {
             }
         }
         return "";
+    }
+
+    private boolean matchesRevealRequirement(Card card, String requirement) {
+        String normalized = safeLower(requirement);
+        String type = safeLower(card.getType());
+        if (normalized.contains("spell/trap") || normalized.contains("spell or trap")) {
+            if (!isSpellOrTrap(card)) return false;
+        } else {
+            if (normalized.contains("spell") && !type.contains("spell")) return false;
+            if (normalized.contains("trap") && !type.contains("trap")) return false;
+        }
+        if (normalized.contains("monster") && !type.contains("monster")) return false;
+
+        List<String> quotedTerms = extractQuotedTerms(requirement);
+        return quotedTerms.stream().allMatch(term -> {
+            String quoted = safeLower(term);
+            return safeLower(card.getName()).contains(quoted)
+                    || safeLower(card.getArchetype()).contains(quoted)
+                    || safeLower(card.getDescription()).contains(quoted);
+        });
     }
 
     private int wordCount(String value) {
@@ -1323,15 +1402,19 @@ public class ComboService {
 
     private void buildExplicitComboRoutes(Card card, String description, Map<String, ComboDraft> drafts) {
         List<Card> relatedCards = getRelatedArchetypeCards(card);
-        String archetype = safeLower(card.getArchetype());
 
         List<String> quotedCards = extractQuotedTerms(description);
         for (String quoted : quotedCards) {
+            if (Pattern.compile("mentions\\s+\"" + Pattern.quote(quoted) + "\"", Pattern.CASE_INSENSITIVE)
+                    .matcher(description).find()) {
+                continue;
+            }
             Card matchedCard = findBestCardMatch(quoted);
             if (matchedCard == null || Objects.equals(matchedCard.getId(), card.getId())) {
                 continue;
             }
-            if (!sameArchetype(archetype, matchedCard)) {
+            String explicitDestination = destinationForExplicitReference(description, quoted, matchedCard);
+            if (explicitDestination.isBlank()) {
                 continue;
             }
             if (isExtraDeckMonster(matchedCard)
@@ -1345,7 +1428,7 @@ public class ComboService {
                     draft,
                     timingForEffect(card, description),
                     sourceZoneFor(card),
-                    destinationForEffect(description, matchedCard));
+                    explicitDestination);
 
             if (description.contains("fusion summon")) {
                 addScore(draft, 20, "It appears in a Fusion Summon line");
@@ -1411,6 +1494,16 @@ public class ComboService {
             }
         }
 
+        String mentionedSpellTrapName = mentionedSpellTrapReference(effectText);
+        if (!mentionedSpellTrapName.isBlank()) {
+            for (String type : List.of("spell", "trap")) {
+                for (Card candidate : cardRepository
+                        .findByTypeContainingIgnoreCaseAndDescriptionContainingIgnoreCase(type, mentionedSpellTrapName)) {
+                    candidates.putIfAbsent(safeLower(candidate.getName()), candidate);
+                }
+            }
+        }
+
         if (containsAny(effectText, "search", "add to your hand", "add 1")) {
             for (String quotedTerm : extractQuotedTerms(effectText)) {
                 if (quotedTerm.isBlank() || safeLower(quotedTerm).equals(safeLower(source.getName()))) {
@@ -1458,6 +1551,11 @@ public class ComboService {
         boolean sourceCanSetBackrow = !placesContinuousBackrow
                 && containsAny(effectText, "set 1", "set it", "set this", "place 1", "place this card");
         String mentionedCardName = mentionedCardReference(section.text());
+        String mentionedSpellTrapName = mentionedSpellTrapReference(section.text());
+        boolean onlySummonsSelf = Pattern.compile("special summon this card", Pattern.CASE_INSENSITIVE)
+                .matcher(section.text()).find()
+                && !Pattern.compile("special summon (?!this card)", Pattern.CASE_INSENSITIVE)
+                .matcher(section.text()).find();
 
         for (Card candidate : candidates) {
             String targetDescription = safeLower(candidate.getDescription());
@@ -1513,7 +1611,7 @@ public class ComboService {
                 destinations.add("Hand");
             }
 
-            if (sourceCanSummon && isSelfSummoningBridgeTarget(candidate, targetDescription)) {
+            if (sourceCanSummon && !onlySummonsSelf && isSelfSummoningBridgeTarget(candidate, targetDescription)) {
                 score += 60;
                 reasons.add("This card can special summon itself or another extender");
                 destinations.add("Monster Zone");
@@ -1525,9 +1623,15 @@ public class ComboService {
                 destinations.add("Graveyard setup");
             }
 
-            if (sourceCanSetBackrow && isBackrowBridgeTarget(candidate, targetDescription)) {
+            if (sourceCanSetBackrow
+                    && (mentionedSpellTrapName.isBlank()
+                    ? isBackrowBridgeTarget(candidate, targetDescription)
+                    : isSpellOrTrap(candidate)
+                            && targetDescription.contains(safeLower(mentionedSpellTrapName)))) {
                 score += 40;
-                reasons.add("This is searchable/settable backrow follow-up");
+                reasons.add(mentionedSpellTrapName.isBlank()
+                        ? "This is searchable/settable backrow follow-up"
+                        : "This Spell/Trap mentions \"" + mentionedSpellTrapName + "\" as required");
                 destinations.add("Spell & Trap Zone");
             }
 
@@ -1567,6 +1671,45 @@ public class ComboService {
         return pronounReference.find() ? pronounReference.group(1).trim() : "";
     }
 
+    private String mentionedSpellTrapReference(String effectText) {
+        Matcher reference = Pattern.compile(
+                "(?:spell\\s*/\\s*trap|spell(?:\\s+card)?\\s+or\\s+trap(?:\\s+card)?)"
+                        + "\\s+that\\s+mentions\\s+\"([^\"]+)\"",
+                Pattern.CASE_INSENSITIVE)
+                .matcher(effectText);
+        return reference.find() ? reference.group(1).trim() : "";
+    }
+
+    private String destinationForExplicitReference(String effectText, String quoted, Card target) {
+        String text = safeLower(effectText);
+        String token = "\"" + safeLower(quoted) + "\"";
+        int quoteIndex = text.indexOf(token);
+        while (quoteIndex >= 0) {
+            int boundary = Math.max(
+                    Math.max(text.lastIndexOf('.', quoteIndex), text.lastIndexOf(';', quoteIndex)),
+                    text.lastIndexOf(':', quoteIndex));
+            String clausePrefix = text.substring(boundary + 1, quoteIndex);
+            int summon = Math.max(clausePrefix.lastIndexOf("special summon"), clausePrefix.lastIndexOf("fusion summon"));
+            int add = Math.max(clausePrefix.lastIndexOf("add "), clausePrefix.lastIndexOf("add up to"));
+            int set = clausePrefix.lastIndexOf("set ");
+            int place = clausePrefix.lastIndexOf("place ");
+            int send = Math.max(clausePrefix.lastIndexOf("send "), clausePrefix.lastIndexOf("banish "));
+            int latestAction = Stream.of(summon, add, set, place, send).max(Integer::compareTo).orElse(-1);
+
+            if (latestAction >= 0) {
+                if (latestAction == summon) return "Monster Zone";
+                if (latestAction == add) return "Hand";
+                if (latestAction == set) {
+                    return isSpellOrTrap(target) ? "Spell & Trap Zone" : "Monster Zone (Set)";
+                }
+                if (latestAction == place) return destinationForEffect(effectText, target);
+                return text.contains("banish") ? "Banished" : "Graveyard";
+            }
+            quoteIndex = text.indexOf(token, quoteIndex + token.length());
+        }
+        return "";
+    }
+
     // Card and route classification heuristics
 
     private boolean isSpellOrTrap(Card card) {
@@ -1598,6 +1741,11 @@ public class ComboService {
         }
 
         String type = safeLower(candidate.getType());
+        String mentionedSpellTrapName = mentionedSpellTrapReference(sourceText);
+        if (!mentionedSpellTrapName.isBlank()) {
+            return isSpellOrTrap(candidate)
+                    && safeLower(candidate.getDescription()).contains(safeLower(mentionedSpellTrapName));
+        }
         if (sourceText.contains("spell/trap")) {
             return isSpellOrTrap(candidate);
         }
