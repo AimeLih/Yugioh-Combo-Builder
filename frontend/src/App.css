@@ -45,9 +45,9 @@ body { background: #060a12; }
 
 .app-main {
   flex: 1;
-  max-width: 1600px;
+  max-width: none;
   margin: 0 auto;
-  padding: 2.25rem clamp(1rem, 2.5vw, 2.5rem) 4rem;
+  padding: 2.25rem clamp(0.75rem, 1.5vw, 1.75rem) 4rem;
   width: 100%;
 }
 
@@ -162,10 +162,14 @@ body { background: #060a12; }
 
 .results-layout {
   display: grid;
-  grid-template-columns: 235px minmax(0, 1fr);
+  grid-template-columns: minmax(210px, 235px) minmax(0, 1fr);
   gap: clamp(1rem, 2vw, 1.75rem);
   align-items: flex-start;
   animation: fadeUp 0.35s ease both;
+}
+
+.results-layout.no-card-list {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 
@@ -334,7 +338,7 @@ body { background: #060a12; }
 
 .wiki-body {
   display: grid;
-  grid-template-columns: minmax(420px, 1fr) minmax(300px, 380px);
+  grid-template-columns: minmax(620px, 1fr) minmax(340px, 440px);
   align-items: start;
   border-radius: 0 0 9px 9px;
 }
@@ -342,7 +346,7 @@ body { background: #060a12; }
 .wiki-primary-col {
   min-width: 0;
   display: grid;
-  grid-template-columns: clamp(155px, 16vw, 235px) minmax(250px, 1fr);
+  grid-template-columns: clamp(375px, 16vw, 235px) minmax(250px, 1fr);
 }
 
 .wiki-image-col {
@@ -357,7 +361,8 @@ body { background: #060a12; }
 
 .wiki-image-frame {
   width: 100%;
-  aspect-ratio: 68 / 99;
+  height: 510px;
+  aspect-ratio: auto;
   border: 2px solid;
   border-radius: 6px;
   overflow: hidden;
@@ -391,7 +396,7 @@ body { background: #060a12; }
   text-align: center;
 }
 
-.wiki-image-frame:hover .wiki-image { transform: scale(1.04); }
+.wiki-image-frame:hover .wiki-image { transform: none; }
 
 .wiki-info-col {
   min-width: 0;
@@ -1175,7 +1180,7 @@ body { background: #060a12; }
   background: #0d1928;
   color: #c6d4e2;
   text-align: left;
-  cursor: default;
+  cursor: pointer;
 }
 
 .sim-zone-card.live {
@@ -1227,6 +1232,16 @@ body { background: #060a12; }
 .sim-zone-card-actions button:hover {
   border-color: #6da7d0;
   color: #e1f1fc;
+}
+
+.sim-zone-card-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.sim-zone-card-actions .activate-zone-effect {
+  border-color: #3c8c77;
+  color: #9de0c8;
 }
 
 .sim-zone-card-actions .remove-zone-card {
@@ -2012,7 +2027,7 @@ body { background: #060a12; }
 ::-webkit-scrollbar-thumb:hover { background: #3a4055; }
 
 
-@media (max-width: 950px) {
+@media (max-width: 1250px) {
   .results-layout { grid-template-columns: 1fr; }
   .card-list-panel {
     display: grid;
@@ -2023,6 +2038,16 @@ body { background: #060a12; }
   }
   .panel-label { grid-column: 1 / -1; }
   .card-list-item { margin-bottom: 0; }
+}
+
+@media (max-width: 1000px) {
+  .wiki-body { grid-template-columns: 1fr; }
+  .wiki-zones-col {
+    position: static;
+    min-height: 0;
+    max-height: none;
+    overflow-y: visible;
+  }
 }
 
 @media (max-width: 700px) {
