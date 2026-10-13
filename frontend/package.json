@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
-    "test": "node --test src/summonRestrictions.test.js src/effectSourceZone.test.js",
+    "test": "node --test src/summonRestrictions.test.js src/effectSourceZone.test.js src/effectResolution.test.js src/effectParsing.test.js",
     "preview": "vite preview"
   },
   "dependencies": {
