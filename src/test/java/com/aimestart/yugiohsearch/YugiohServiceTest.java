@@ -500,6 +500,173 @@ class YugiohServiceTest {
     }
 
     @Test
+    void revealPrerequisiteRequiresAMatchingCardButDoesNotTreatItAsPayment() {
+        String effect = "If this card is in your hand: You can reveal 1 Spell in your hand; "
+                + "Special Summon this card, then you can Set 1 Spell/Trap that mentions \"Dark Magician\" from your Deck.";
+        Card servant = card(1, "Dark Magician, the Pharaoh's Servant", effect,
+                "Effect Monster", "Dark Magician");
+        Card spell = card(2, "Dark Magical Circle", "When this card is activated: Look at the top 3 cards.",
+                "Spell Card", "Dark Magician");
+        when(repository.getCardByName(servant.getName())).thenReturn(servant);
+        when(repository.findAllByNameIn(org.mockito.ArgumentMatchers.anyCollection())).thenAnswer(invocation -> {
+            java.util.Collection<String> names = invocation.getArgument(0);
+            return names.stream()
+                    .filter(name -> name.equals(servant.getName()) || name.equals(spell.getName()))
+                    .map(name -> name.equals(servant.getName()) ? servant : spell)
+                    .toList();
+        });
+
+        ComboService.EffectPrerequisiteResult unavailable = service.checkEffectPrerequisites(
+                new ComboService.EffectPrerequisiteRequest(
+                        servant.getName(), effect, "hand", Map.of("hand", List.of(servant.getName()))));
+        ComboService.EffectPrerequisiteResult available = service.checkEffectPrerequisites(
+                new ComboService.EffectPrerequisiteRequest(
+                        servant.getName(), effect, "hand",
+                        Map.of("hand", List.of(servant.getName(), spell.getName()))));
+
+        assertFalse(unavailable.available());
+        assertTrue(unavailable.reason().contains("revealing 1 Spell"));
+        assertTrue(available.available());
+        assertTrue(available.reason().isBlank());
+        assertNull(available.legalSummonTargets());
+    }
+
+    @Test
+    void selfSummonThenSetEffectOnlyOffersMatchingSpellTrapFollowUps() {
+        String effect = "If this card is in your hand: You can reveal 1 Spell in your hand; "
+                + "Special Summon this card, then you can Set 1 Spell/Trap that mentions \"Dark Magician\" from your Deck.";
+        Card servant = card(1, "Dark Magician, the Pharaoh's Servant", effect,
+                "Effect Monster", "Dark Magician");
+        Card darkMagician = card(2, "Dark Magician", "The ultimate wizard.",
+                "Normal Monster", "Dark Magician");
+        Card soulServant = card(3, "Soul Servant",
+                "Place 1 card on top of the Deck that is \"Dark Magician\" or mentions \"Dark Magician\".",
+                "Spell Card", "Dark Magician");
+        Card eternalSoul = card(4, "Eternal Soul",
+                "Every \"Dark Magician\" in your Monster Zone is unaffected by your opponent's card effects.",
+                "Trap Card", "Dark Magician");
+        Card magiciansRod = card(5, "Magician's Rod",
+                "Add 1 Spell/Trap that mentions \"Dark Magician\" from your Deck to your hand.",
+                "Effect Monster", "Dark Magician");
+        Card unrelatedSpell = card(6, "Dark Magic Attack", "Destroy all Spells and Traps your opponent controls.",
+                "Spell Card", "Dark Magician");
+
+        when(repository.getCardByName(servant.getName())).thenReturn(servant);
+        when(repository.findByArchetypeContainingIgnoreCase("Dark Magician"))
+                .thenReturn(List.of(darkMagician, soulServant, eternalSoul, magiciansRod, unrelatedSpell));
+        when(repository.findByTypeContainingIgnoreCaseAndDescriptionContainingIgnoreCase("spell", "Dark Magician"))
+                .thenReturn(List.of(soulServant));
+        when(repository.findByTypeContainingIgnoreCaseAndDescriptionContainingIgnoreCase("trap", "Dark Magician"))
+                .thenReturn(List.of(eternalSoul));
+
+        List<ComboService.ComboOption> options = service.getPossibleCombos(servant.getName(), "hand", effect);
+
+        assertEquals(Set.of(soulServant.getName(), eternalSoul.getName()), options.stream()
+                .map(option -> option.card().getName())
+                .collect(java.util.stream.Collectors.toSet()));
+        assertTrue(options.stream().allMatch(option -> option.destination().equals("Spell & Trap Zone")));
+        assertTrue(options.stream().noneMatch(option -> option.card().getName().equals(darkMagician.getName())));
+        assertTrue(options.stream().noneMatch(option -> option.card().getName().equals(magiciansRod.getName())));
+    }
+
+    @Test
+    void addEffectThatMentionsACardOnlyOffersMatchingSpellTraps() {
+        String effect = "Add 1 Spell/Trap that mentions \"Dark Magician\" from your Deck to your hand.";
+        Card source = card(1, "Matching Searcher", effect, "Spell Card", "Dark Magician");
+        Card matching = card(2, "Matching Spell", "Special Summon 1 \"Dark Magician\" from your hand.",
+                "Spell Card", "Dark Magician");
+        Card unrelated = card(3, "Unrelated Spell", "Draw 1 card.",
+                "Spell Card", "Dark Magician");
+        when(repository.getCardByName(source.getName())).thenReturn(source);
+        when(repository.findByArchetypeContainingIgnoreCase("Dark Magician"))
+                .thenReturn(List.of(matching, unrelated));
+        when(repository.findByTypeContainingIgnoreCaseAndDescriptionContainingIgnoreCase("spell", "Dark Magician"))
+                .thenReturn(List.of(matching));
+        when(repository.findByTypeContainingIgnoreCaseAndDescriptionContainingIgnoreCase("trap", "Dark Magician"))
+                .thenReturn(List.of());
+        when(repository.findByNameContainingIgnoreCase("Dark Magician")).thenReturn(List.of());
+        when(repository.findByTypeContainingIgnoreCaseAndDescriptionContainingIgnoreCase("", "Dark Magician"))
+                .thenReturn(List.of(matching));
+
+        List<ComboService.ComboOption> options = service.getPossibleCombos(source.getName(), null, effect);
+
+        assertEquals(List.of(matching.getName()), options.stream().map(option -> option.card().getName()).toList());
+        assertTrue(options.stream().allMatch(option -> option.destination().equals("Hand")));
+    }
+
+    @Test
+    void namedSummonFromHandDeckOrGraveyardUsesDatabaseTargetAndKeepsFollowUpsSeparate() {
+        String effect = "If you control \"Dark Magician\": Special Summon 1 \"Dark Magician Girl\" "
+                + "from your hand, Deck, or GY, then, you can Set 1 \"Dark Magic Attack\", "
+                + "\"Dark Burning Attack\", \"Dark Burning Magic\", or \"Dark Magic Twin Burst\" directly from your Deck.";
+        Card bond = card(1, "Bond Between Teacher and Student", effect, "Spell Card", "Dark Magician");
+        Card darkMagician = card(2, "Dark Magician", "The ultimate wizard.", "Normal Monster", "Dark Magician");
+        Card darkMagicianGirl = card(3, "Dark Magician Girl", "Gains ATK for each named card in the GYs.",
+                "Effect Monster", "Dark Magician");
+        Card attack = card(4, "Dark Magic Attack", "Destroy your opponent's Spells and Traps.",
+                "Spell Card", "Dark Magician");
+        Card burningAttack = card(5, "Dark Burning Attack", "Destroy face-up monsters.",
+                "Spell Card", "Dark Magician");
+        Card burningMagic = card(6, "Dark Burning Magic", "Destroy cards your opponent controls.",
+                "Spell Card", "Dark Magician");
+        Card twinBurst = card(7, "Dark Magic Twin Burst", "A monster gains ATK.",
+                "Spell Card", "Dark Magician");
+        List<Card> referenced = List.of(
+                darkMagician, darkMagicianGirl, attack, burningAttack, burningMagic, twinBurst);
+
+        when(repository.getCardByName(bond.getName())).thenReturn(bond);
+        when(repository.findByArchetypeContainingIgnoreCase("Dark Magician")).thenReturn(referenced);
+        when(repository.findByNameContainingIgnoreCase(org.mockito.ArgumentMatchers.anyString()))
+                .thenAnswer(invocation -> {
+                    String term = invocation.getArgument(0);
+                    return referenced.stream().filter(card -> card.getName().toLowerCase()
+                            .contains(term.toLowerCase())).toList();
+                });
+
+        List<ComboService.ComboOption> options = service.getPossibleCombos(bond.getName(), null, effect);
+
+        ComboService.ComboOption summon = options.stream()
+                .filter(option -> option.card().getName().equals(darkMagicianGirl.getName()))
+                .findFirst().orElseThrow();
+        assertEquals("Monster Zone", summon.destination());
+        assertEquals(
+                Set.of(darkMagicianGirl.getName(), attack.getName(), burningAttack.getName(),
+                        burningMagic.getName(), twinBurst.getName()),
+                options.stream().map(option -> option.card().getName())
+                        .collect(java.util.stream.Collectors.toSet()));
+        assertFalse(options.stream().anyMatch(option -> option.card().getName().equals(darkMagician.getName())));
+        assertTrue(options.stream()
+                .filter(option -> Set.of(attack.getName(), burningAttack.getName(), burningMagic.getName(), twinBurst.getName())
+                        .contains(option.card().getName()))
+                .allMatch(option -> option.destination().equals("Spell & Trap Zone")));
+    }
+
+    @Test
+    void namedControlConditionIsCheckedBeforeActivation() {
+        String effect = "If you control \"Dark Magician\": Special Summon 1 \"Dark Magician Girl\" "
+                + "from your hand, Deck, or GY.";
+        Card bond = card(1, "Bond Between Teacher and Student", effect, "Spell Card", "Dark Magician");
+        Card darkMagician = card(2, "Dark Magician", "The ultimate wizard.", "Normal Monster", "Dark Magician");
+        when(repository.getCardByName(bond.getName())).thenReturn(bond);
+        when(repository.findAllByNameIn(org.mockito.ArgumentMatchers.anyCollection())).thenAnswer(invocation -> {
+            java.util.Collection<String> names = invocation.getArgument(0);
+            return names.contains(darkMagician.getName()) ? List.of(darkMagician) : List.of();
+        });
+
+        ComboService.EffectPrerequisiteResult unavailable = service.checkEffectPrerequisites(
+                new ComboService.EffectPrerequisiteRequest(
+                        bond.getName(), effect, "spellTrapZone", Map.of("monsterZone", List.of())));
+        ComboService.EffectPrerequisiteResult available = service.checkEffectPrerequisites(
+                new ComboService.EffectPrerequisiteRequest(
+                        bond.getName(), effect, "spellTrapZone",
+                        Map.of("monsterZone", List.of(darkMagician.getName()))));
+
+        assertFalse(unavailable.available());
+        assertTrue(unavailable.reason().contains("control \"Dark Magician\""));
+        assertTrue(available.available());
+    }
+
+    @Test
     void selfSummoningTextDoesNotUnlockOtherArchetypeCards() {
         Card source = card(1, "Test Self Summoner",
                 "If you control no monsters: You can Special Summon this card from your hand.",
