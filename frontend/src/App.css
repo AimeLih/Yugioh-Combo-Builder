@@ -196,7 +196,51 @@ body { background: #060a12; }
   outline: none;
 }
 
+.filter-panel select {
+  appearance: none;
+  padding-right: 2.5rem;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23c9a227' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 16px;
+  box-shadow: 0 0 0 rgba(201, 162, 39, 0);
+  transition:
+      border-color 0.18s ease,
+      background-color 0.18s ease,
+      box-shadow 0.18s ease,
+      transform 0.12s ease;
+}
+
+.filter-panel select:hover {
+  border-color: #6f612d;
+  background-color: #1a2131;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.24);
+  transform: translateY(-1px);
+}
+
 .filter-panel select:focus,
+.filter-panel select:open {
+  border-color: #c9a227;
+  background-color: #1b2232;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23f0d878' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 15-6-6-6 6'/%3E%3C/svg%3E");
+  box-shadow: 0 0 0 3px rgba(201, 162, 39, 0.14), 0 7px 20px rgba(0, 0, 0, 0.32);
+  transform: translateY(-1px);
+}
+
+.filter-panel select:active {
+  transform: translateY(0) scale(0.985);
+}
+
+.filter-panel label:has(select:hover) > span,
+.filter-panel label:has(select:focus) > span {
+  color: #d9bf5a;
+}
+
+.filter-panel label > span {
+  transition: color 0.18s ease;
+}
+
 .filter-panel input:focus { border-color: #c9a227; }
 
 .clear-filter-btn {
@@ -300,6 +344,9 @@ body { background: #060a12; }
 }
 
 .card-list-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   background: #10141f;
   border: 1px solid #1c2233;
   border-left: 3px solid;
@@ -308,6 +355,21 @@ body { background: #060a12; }
   margin-bottom: 0.4rem;
   cursor: pointer;
   transition: background 0.15s, transform 0.12s, box-shadow 0.15s;
+}
+
+.card-list-thumbnail {
+  width: 42px;
+  height: 58px;
+  flex: 0 0 42px;
+  object-fit: cover;
+  border: 1px solid rgba(232, 191, 62, 0.28);
+  border-radius: 3px;
+  background: #090c13;
+  box-shadow: 0 3px 9px rgba(0, 0, 0, 0.38);
+}
+
+.card-list-copy {
+  min-width: 0;
 }
 
 .card-list-item:hover {
