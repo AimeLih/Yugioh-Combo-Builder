@@ -7,6 +7,16 @@ import java.util.List;
 
 @Entity
 @Table(name = "cards")
+@NamedEntityGraph(
+        name = "Card.details",
+        attributeNodes = {
+                @NamedAttributeNode("typeReference"),
+                @NamedAttributeNode("raceReference"),
+                @NamedAttributeNode("attributeReference"),
+                @NamedAttributeNode("archetypeReference"),
+                @NamedAttributeNode("linkmarkers")
+        }
+)
 public class Card {
 
     @Id
@@ -19,8 +29,9 @@ public class Card {
     @Column(nullable = false, columnDefinition = "TEXT")
     private String description;
 
-    @Column(nullable = false, columnDefinition = "TEXT")
-    private String type;
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "type_id", nullable = false)
+    private CardType typeReference;
 
     @Column(nullable = false)
     private int weight;
@@ -34,14 +45,17 @@ public class Card {
     @Column
     private Integer level;
 
-    @Column(columnDefinition = "TEXT")
-    private String race;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "race_id")
+    private CardRace raceReference;
 
-    @Column(columnDefinition = "TEXT")
-    private String attribute;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "attribute_id")
+    private CardAttribute attributeReference;
 
-    @Column(columnDefinition = "TEXT")
-    private String archetype;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "archetype_id")
+    private Archetype archetypeReference;
 
     @Column
     private Integer scale;
@@ -49,7 +63,13 @@ public class Card {
     @Column
     private Integer linkvalue;
 
-    @Column(name = "LinkMarkers", columnDefinition = "text[]")
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(
+            name = "card_link_markers",
+            joinColumns = @JoinColumn(name = "card_id")
+    )
+    @OrderColumn(name = "marker_order")
+    @Column(name = "marker", nullable = false, columnDefinition = "TEXT")
     private List<String> linkmarkers = new ArrayList<>();
 
     @Column
@@ -63,7 +83,7 @@ public class Card {
     public Card(String name, String description, String type, int weight) {
         this.name = name;
         this.description = description;
-        this.type = type;
+        setType(type);
         this.weight = weight;
     }
 
@@ -96,11 +116,11 @@ public class Card {
     }
 
     public String getType() {
-        return type;
+        return typeReference == null ? null : typeReference.getName();
     }
 
     public void setType(String type) {
-        this.type = type;
+        this.typeReference = type == null ? null : new CardType(type);
     }
 
     public Integer getLevel() {
@@ -128,27 +148,43 @@ public class Card {
     }
 
     public String getRace() {
-        return race;
+        return raceReference == null ? null : raceReference.getName();
     }
 
     public void setRace(String race) {
-        this.race = race;
+        this.raceReference = race == null ? null : new CardRace(race);
     }
 
     public String getAttribute() {
-        return attribute;
+        return attributeReference == null ? null : attributeReference.getName();
     }
 
     public void setAttribute(String attribute) {
-        this.attribute = attribute;
+        this.attributeReference = attribute == null ? null : new CardAttribute(attribute);
     }
 
     public String getArchetype() {
-        return archetype;
+        return archetypeReference == null ? null : archetypeReference.getName();
     }
 
     public void setArchetype(String archetype) {
-        this.archetype = archetype;
+        this.archetypeReference = archetype == null ? null : new Archetype(archetype);
+    }
+
+    void setTypeReference(CardType typeReference) {
+        this.typeReference = typeReference;
+    }
+
+    void setRaceReference(CardRace raceReference) {
+        this.raceReference = raceReference;
+    }
+
+    void setAttributeReference(CardAttribute attributeReference) {
+        this.attributeReference = attributeReference;
+    }
+
+    void setArchetypeReference(Archetype archetypeReference) {
+        this.archetypeReference = archetypeReference;
     }
 
     public Integer getScale() {
