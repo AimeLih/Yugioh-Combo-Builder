@@ -28,6 +28,8 @@ public class ComboService {
     private static final Pattern MAXIMUM_LEVEL_PATTERN = Pattern.compile("\\blevel\\s+(\\d+)\\s+or lower\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern ATK_REQUIREMENT_PATTERN = Pattern.compile("(\\d+)\\s+or\\s+(more|less)\\s+ATK", Pattern.CASE_INSENSITIVE);
     private static final Pattern DEF_REQUIREMENT_PATTERN = Pattern.compile("(\\d+)\\s+or\\s+(more|less)\\s+DEF", Pattern.CASE_INSENSITIVE);
+    private static final List<String> FIELD_ZONE_KEYS = List.of(
+            "monsterZone", "extraMonsterZone", "spellTrapZone", "pendulumZone");
     private static final List<String> MONSTER_RACES = List.of(
             "aqua", "beast", "beast-warrior", "cyberse", "dinosaur", "divine-beast",
             "dragon", "fairy", "fiend", "fish", "illusion", "insect", "machine",
@@ -615,10 +617,7 @@ public class ComboService {
         if (controlsNamedCard.find()) {
             String requiredName = controlsNamedCard.group(1);
             boolean familyMatch = controlsNamedCard.group(2) != null;
-            List<String> controlledNames = Stream.concat(
-                            zones.getOrDefault("monsterZone", Collections.emptyList()).stream(),
-                            zones.getOrDefault("extraMonsterZone", Collections.emptyList()).stream())
-                    .toList();
+            List<String> controlledNames = fieldCardNames(zones);
             Map<String, Card> controlledCards = cardRepository.findAllByNameIn(new LinkedHashSet<>(controlledNames))
                     .stream()
                     .collect(Collectors.toMap(
@@ -636,6 +635,48 @@ public class ComboService {
             if (!controlsRequiredCard) {
                 return "This effect requires you to control "
                         + (familyMatch ? "a \"" + requiredName + "\" monster." : "\"" + requiredName + "\".");
+            }
+        }
+
+        Matcher minimumControlledCards = Pattern.compile(
+                "if you control (\\d+) or more (.+?)(?::|$)",
+                Pattern.CASE_INSENSITIVE)
+                .matcher(costClause);
+        if (minimumControlledCards.find()) {
+            int required = Integer.parseInt(minimumControlledCards.group(1));
+            List<String> requiredNames = extractQuotedTerms(minimumControlledCards.group(2));
+            List<String> controlledNames = fieldCardNames(zones);
+            Map<String, Card> controlledCards = cardsByName(
+                    cardRepository.findAllByNameIn(new LinkedHashSet<>(controlledNames)),
+                    Collections.emptyList());
+            long available = controlledNames.stream()
+                    .map(name -> controlledCards.get(safeLower(name)))
+                    .filter(Objects::nonNull)
+                    .filter(card -> requiredNames.stream().anyMatch(requiredName ->
+                            matchesFieldCardName(card, requiredName)))
+                    .count();
+            if (available < required) {
+                return "This effect requires you to control " + required + " or more "
+                        + String.join(" and/or ", requiredNames) + " cards on the field.";
+            }
+        }
+
+        Matcher namedCardOnField = Pattern.compile(
+                "if\\s+\"([^\"]+)\"\\s+is on (?:your|the) field",
+                Pattern.CASE_INSENSITIVE)
+                .matcher(costClause);
+        if (namedCardOnField.find()) {
+            String requiredName = namedCardOnField.group(1);
+            List<String> fieldNames = fieldCardNames(zones);
+            Map<String, Card> fieldCards = cardsByName(
+                    cardRepository.findAllByNameIn(new LinkedHashSet<>(fieldNames)),
+                    Collections.emptyList());
+            boolean present = fieldNames.stream()
+                    .map(name -> fieldCards.get(safeLower(name)))
+                    .filter(Objects::nonNull)
+                    .anyMatch(card -> matchesFieldCardName(card, requiredName));
+            if (!present) {
+                return "This effect requires \"" + requiredName + "\" to be on the field.";
             }
         }
 
@@ -732,7 +773,23 @@ public class ComboService {
 
     private boolean isFieldZone(String zone) {
         String normalized = safeLower(zone);
-        return normalized.contains("monster") || normalized.contains("field");
+        return normalized.contains("monster")
+                || normalized.contains("spelltrap")
+                || normalized.contains("spell & trap")
+                || normalized.contains("pendulum")
+                || normalized.contains("field");
+    }
+
+    private List<String> fieldCardNames(Map<String, List<String>> zones) {
+        return FIELD_ZONE_KEYS.stream()
+                .flatMap(zone -> zones.getOrDefault(zone, Collections.emptyList()).stream())
+                .toList();
+    }
+
+    private boolean matchesFieldCardName(Card card, String requiredName) {
+        if (card.getName().equalsIgnoreCase(requiredName)) return true;
+        String treatedAsText = "name is always treated as \"" + safeLower(requiredName) + "\"";
+        return safeLower(card.getDescription()).contains(treatedAsText);
     }
 
     private List<Card> materialCardsFromZones(
