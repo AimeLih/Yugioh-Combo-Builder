@@ -1,6 +1,7 @@
 package com.aimestart.yugiohsearch;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -14,12 +15,33 @@ import java.util.Set;
 @Service
 public class CardCatalogService {
 
+    private static final int MAX_SEARCH_RESULTS = 5_000;
+
+    public record CardSearchSummary(Long id, String name, String type) {
+    }
+
+    public record FilterOption(Integer id, String name) {
+    }
+
+    public record CardFilterOptions(
+            List<FilterOption> types,
+            List<FilterOption> races,
+            List<FilterOption> attributes
+    ) {
+    }
+
     private final YugiohService yugiohService;
     private final CardRepository cardRepository;
+    private final CardReferenceDataService cardReferenceDataService;
 
-    public CardCatalogService(YugiohService yugiohService, CardRepository cardRepository) {
+    public CardCatalogService(
+            YugiohService yugiohService,
+            CardRepository cardRepository,
+            CardReferenceDataService cardReferenceDataService
+    ) {
         this.yugiohService = yugiohService;
         this.cardRepository = cardRepository;
+        this.cardReferenceDataService = cardReferenceDataService;
     }
 
     @Transactional
@@ -38,6 +60,7 @@ public class CardCatalogService {
                 .toList();
 
         if (!newCards.isEmpty()) {
+            cardReferenceDataService.resolveReferences(newCards);
             cardRepository.saveAll(newCards);
         }
         return newCards.size();
@@ -51,12 +74,46 @@ public class CardCatalogService {
         return card;
     }
 
-    public List<Card> getCardsBySubstring(String name) {
-        List<Card> cards = cardRepository.findTop50ByNameContainingIgnoreCaseOrderByNameAsc(name);
-        if (cards.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No cards found with that name");
-        }
+    public List<CardSearchSummary> getCardsBySubstring(
+            String name,
+            Integer typeId,
+            Integer raceId,
+            Integer attributeId,
+            Integer archetypeId,
+            int limit
+    ) {
+        List<CardSearchSummary> cards = cardRepository
+                .findSearchSummariesByName(
+                        name,
+                        typeId,
+                        raceId,
+                        attributeId,
+                        archetypeId,
+                        PageRequest.of(0, Math.max(1, Math.min(limit, MAX_SEARCH_RESULTS))))
+                .stream()
+                .map(card -> new CardSearchSummary(card.getId(), card.getName(), card.getType()))
+                .toList();
         return cards;
+    }
+
+    public CardFilterOptions getFilterOptions() {
+        return new CardFilterOptions(
+                cardReferenceDataService.getCardTypes().stream().map(this::filterOption).toList(),
+                cardReferenceDataService.getCardRaces().stream().map(this::filterOption).toList(),
+                cardReferenceDataService.getCardAttributes().stream().map(this::filterOption).toList()
+        );
+    }
+
+    public List<FilterOption> getArchetypeSuggestions(String query, int limit) {
+        return cardReferenceDataService
+                .getArchetypeSuggestions(query, limit)
+                .stream()
+                .map(this::filterOption)
+                .toList();
+    }
+
+    private FilterOption filterOption(NamedCardReference reference) {
+        return new FilterOption(reference.getId(), reference.getName());
     }
 
     private int weightForType(String type) {
