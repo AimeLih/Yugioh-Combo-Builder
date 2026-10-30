@@ -669,6 +669,64 @@ class YugiohServiceTest {
     }
 
     @Test
+    void elegantEgotistRequiresHarpieLadyInOneOfTheFourFieldZones() {
+        String effect = "If \"Harpie Lady\" is on the field: Special Summon 1 \"Harpie Lady\" "
+                + "or \"Harpie Lady Sisters\" from your hand or Deck.";
+        Card egotist = card(1, "Elegant Egotist", effect, "Spell Card", "Harpie");
+        Card harpieLady = card(2, "Harpie Lady", "A winged beast.", "Normal Monster", "Harpie");
+        when(repository.getCardByName(egotist.getName())).thenReturn(egotist);
+        when(repository.findAllByNameIn(org.mockito.ArgumentMatchers.anyCollection())).thenAnswer(invocation -> {
+            java.util.Collection<String> names = invocation.getArgument(0);
+            return names.contains(harpieLady.getName()) ? List.of(harpieLady) : List.of();
+        });
+
+        ComboService.EffectPrerequisiteResult graveyardOnly = service.checkEffectPrerequisites(
+                new ComboService.EffectPrerequisiteRequest(
+                        egotist.getName(), effect, "hand",
+                        Map.of("graveyard", List.of(harpieLady.getName()))));
+        ComboService.EffectPrerequisiteResult pendulumField = service.checkEffectPrerequisites(
+                new ComboService.EffectPrerequisiteRequest(
+                        egotist.getName(), effect, "hand",
+                        Map.of("pendulumZone", List.of(harpieLady.getName()))));
+
+        assertFalse(graveyardOnly.available());
+        assertTrue(graveyardOnly.reason().contains("on the field"));
+        assertTrue(pendulumField.available());
+    }
+
+    @Test
+    void phoenixFormationCountsRequiredCardsOnlyAcrossFieldZones() {
+        String effect = "If you control 3 or more \"Harpie Lady\" and/or \"Harpie Lady Sisters\": "
+                + "Target as many monsters your opponent controls as possible; destroy those targets.";
+        Card formation = card(1, "Harpie Lady Phoenix Formation", effect, "Spell Card", "Harpie");
+        Card harpieLady = card(2, "Harpie Lady", "A winged beast.", "Normal Monster", "Harpie");
+        when(repository.getCardByName(formation.getName())).thenReturn(formation);
+        when(repository.findAllByNameIn(org.mockito.ArgumentMatchers.anyCollection())).thenAnswer(invocation -> {
+            java.util.Collection<String> names = invocation.getArgument(0);
+            return names.contains(harpieLady.getName()) ? List.of(harpieLady) : List.of();
+        });
+
+        ComboService.EffectPrerequisiteResult twoFieldOneGraveyard = service.checkEffectPrerequisites(
+                new ComboService.EffectPrerequisiteRequest(
+                        formation.getName(), effect, "hand",
+                        Map.of(
+                                "monsterZone", List.of(harpieLady.getName()),
+                                "spellTrapZone", List.of(harpieLady.getName()),
+                                "graveyard", List.of(harpieLady.getName()))));
+        ComboService.EffectPrerequisiteResult threeFieldCards = service.checkEffectPrerequisites(
+                new ComboService.EffectPrerequisiteRequest(
+                        formation.getName(), effect, "hand",
+                        Map.of(
+                                "monsterZone", List.of(harpieLady.getName()),
+                                "extraMonsterZone", List.of(harpieLady.getName()),
+                                "pendulumZone", List.of(harpieLady.getName()))));
+
+        assertFalse(twoFieldOneGraveyard.available());
+        assertTrue(twoFieldOneGraveyard.reason().contains("3 or more"));
+        assertTrue(threeFieldCards.available());
+    }
+
+    @Test
     void selfSummoningTextDoesNotUnlockOtherArchetypeCards() {
         Card source = card(1, "Test Self Summoner",
                 "If you control no monsters: You can Special Summon this card from your hand.",
