@@ -2,7 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import { activationSummonRestrictions, summonRestrictionReason } from './summonRestrictions.js'
 import { effectSourceZone } from './effectSourceZone.js'
-import { effectNeedsPrerequisiteCheck, specialSummonsSelfFromZone } from './effectResolution.js'
+import {
+  effectNeedsPrerequisiteCheck,
+  isSpellTrapCard,
+  specialSummonsSelfFromZone,
+  spellTrapResolutionZone,
+} from './effectResolution.js'
 import { splitCardEffects } from './effectParsing.js'
 
 function typeColor(type) {
@@ -452,7 +457,15 @@ function cardEffectOptions(card, zone = null, entry = null) {
     if (zone === 'graveyard') return source === 'graveyard'
     if (zone === 'banished') return source === 'banished'
     if (zone === 'monsterZone' || zone === 'extraMonsterZone') return source.includes('monster zone')
-    if (zone === 'hand') return source.includes('hand') && !isOnSummonEffect(effect)
+    if (zone === 'hand') {
+      if (isSpellTrapCard(card)) {
+        return !source.includes('graveyard')
+            && !source.includes('banished')
+            && !source.includes('pendulum zone')
+            && !source.includes('monster zone')
+      }
+      return source.includes('hand') && !isOnSummonEffect(effect)
+    }
     if (zone === 'pendulumZone') return source.includes('pendulum zone')
     if (zone === 'spellTrapZone') {
       return source.includes('spell & trap zone')
@@ -2388,7 +2401,11 @@ export default function App() {
     const card = entry?.card ?? selected
     if (!card) return
     const resolvedEntry = entry ?? { instanceId: `card-${card.id ?? card.name}`, card, moveReason: 'selected' }
-    const effects = cardEffectOptions(card, zone, resolvedEntry)
+    const effects = cardEffectOptions(card, zone, resolvedEntry).map(effect => (
+      zone === 'hand' && isSpellTrapCard(card)
+        ? { ...effect, sourceZone: 'Hand' }
+        : effect
+    ))
     if (effects.length === 0) {
       setError(`${card.name} has no effect that can be activated from ${displayZoneName(zone)}.`)
       return
@@ -2466,6 +2483,13 @@ export default function App() {
         && specialSummonsSelfFromZone(effect.text, zone)
         && placementCapacityReason(zones, 'monsterZone')) {
       setError('The Main Monster Zones are full, so this card cannot be Special Summoned.')
+      return
+    }
+    if (entry
+        && zone === 'hand'
+        && isSpellTrapCard(card)
+        && placementCapacityReason(zones, 'spellTrapZone')) {
+      setError('The Spell & Trap Zones are full, so this card cannot be activated from the Hand.')
       return
     }
     setComboHistory(prev => [...prev, snapshotComboState()])
@@ -2547,6 +2571,26 @@ export default function App() {
       })
       resolvedZone = 'monsterZone'
       setSelectedEntry(summonedEntry)
+    } else if (entry && isSpellTrapCard(card) && ['hand', 'spellTrapZone'].includes(zone)) {
+      const resolutionZone = spellTrapResolutionZone(card, entry, effect.text)
+      const resolvedEntry = {
+        ...entry,
+        moveReason: resolutionZone === 'spellTrapZone'
+          ? 'activated-continuous-spell-trap'
+          : 'spell-trap-resolution',
+        treatedAs: resolutionZone === 'spellTrapZone' ? entry.treatedAs : null,
+        overlayMaterials: [],
+      }
+      setZones(prev => {
+        const next = Object.fromEntries(ZONE_KEYS.map(zoneName => [
+          zoneName,
+          prev[zoneName].filter(candidate => candidate.instanceId !== entry.instanceId),
+        ]))
+        next[resolutionZone].push(resolvedEntry)
+        return next
+      })
+      resolvedZone = resolutionZone
+      setSelectedEntry(resolvedEntry)
     }
 
     setActiveZoneContext(resolvedZone)
