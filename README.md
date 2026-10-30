@@ -14,7 +14,11 @@ You can also view the repository's latest development history on the [GitHub Act
 
 ## Features
 
-- Search cards by partial name or exact name
+- Search cards by partial name with a live, 10-result autocomplete menu
+- Select an autocomplete option or search result to perform an exact-name lookup
+- Filter cards by type, race, attribute, and archetype
+- Find archetypes through a live, 10-result autocomplete menu
+- Browse compact search summaries with lazily loaded card-art thumbnails
 - View card text, stats, type, archetype, artwork, and once-per-turn information
 - Add selected search results to the Hand without resetting the current board
 - Explore ranked combo starters, extenders, and enders
@@ -35,7 +39,7 @@ You can also view the repository's latest development history on the [GitHub Act
 
 - **Frontend:** React 19, Vite 8
 - **Backend:** Java 17, Spring Boot 4, Spring Data JPA
-- **Database:** PostgreSQL
+- **Database:** Neon PostgreSQL 18 with Flyway migrations
 - **Card data:** YGOPRODeck API
 - **Testing:** JUnit 5, Mockito
 
@@ -83,11 +87,39 @@ SPRING_CACHE_TYPE=simple
 IMPORT_TOKEN=choose_a_private_local_token
 ```
 
-Flyway applies the database schema automatically at backend startup. Cards use
-numeric foreign keys for types, races, attributes, and archetypes, while ordered
-link markers live in a child table. Exact and relationship lookups use normal
-B-tree indexes. Partial case-insensitive searches use PostgreSQL GIN trigram
-indexes on card names/descriptions and searchable reference names.
+Flyway applies the database schema automatically at backend startup. The current
+schema version is V5. Cards use numeric foreign keys for types, races, attributes,
+and archetypes, while ordered link markers live in a child table.
+
+### Database structure
+
+```text
+cards
+├── type_id      → card_types.id
+├── race_id      → card_races.id
+├── attribute_id → card_attributes.id
+├── archetype_id → archetypes.id
+└── id           → card_link_markers.card_id
+```
+
+The application tables currently have 15 B-tree indexes:
+
+- Primary and unique indexes for card IDs and names
+- Primary and unique indexes for each reference table's ID and name
+- Card relationship indexes on `type_id`, `race_id`, `attribute_id`, and `archetype_id`
+- A composite link-marker index on `(card_id, marker_order)`
+
+Flyway owns another two B-tree indexes for migration bookkeeping. Four GIN
+trigram indexes support case-insensitive substring searches on card names, card
+descriptions, type names, and archetype names.
+
+### Search loading strategy
+
+Search and filter requests return lightweight summaries containing only the card
+ID, name, type, and image URL. The frontend lazily loads thumbnail images and
+does not fetch descriptions, stats, reference relationships, or link markers for
+every result. Selecting a card performs an exact-name lookup and loads its full
+details through the `Card.details` entity graph.
 
 ### 2. Start the backend
 
@@ -135,13 +167,14 @@ VITE_API_URL=https://your-api.example.com
 
 ## Using the App
 
-1. Search for a card by name.
-2. Select a result to inspect it and add a copy to your Hand. Existing zones are preserved.
-3. Use the card's zone actions to Summon it, Set it, or place a Pendulum Monster in a Pendulum Zone.
-4. On-summon effects prompt immediately. Activate other effects manually from the card's current zone.
-5. Choose an available starter, extender, follow-up, or ender and pay any requested material costs.
-6. Use **Synchro / Xyz / Link** to search for a legal Extra Deck summon, or **Pendulum Summon** after establishing two scales.
-7. Advance the phase for timing-locked effects, use **Back** to revisit a route, or use **Clear Zones** to start with an empty board.
+1. Start typing a card name and choose one of the 10 live suggestions, or press **Search** for a larger result list.
+2. Open **Filter** to narrow results by type, race, attribute, or archetype. Archetypes are selected through their own live autocomplete field.
+3. Select a result to load its complete details. Existing zones are preserved.
+4. Use the card's zone actions to Summon it, Set it, or place a Pendulum Monster in a Pendulum Zone.
+5. On-summon effects prompt immediately. Activate other effects manually from the card's current zone.
+6. Choose an available starter, extender, follow-up, or ender and pay any requested material costs.
+7. Use **Synchro / Xyz / Link** to search for a legal Extra Deck summon, or **Pendulum Summon** after establishing two scales.
+8. Advance the phase for timing-locked effects, use **Back** to revisit a route, or use **Clear Zones** to start with an empty board.
 
 The combo engine presents routes it can derive from card text and the modeled game state. Extra Deck material validation covers common Synchro, Xyz, and Link requirements; complex card-specific rulings may still require manual judgment.
 
@@ -152,8 +185,11 @@ All endpoints use the `/yugioh` prefix.
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
 | `POST` | `/admin/import` | Import cards not already in the database |
-| `GET` | `/card?name=...` | Find one card by exact name |
-| `GET` | `/card/substring?name=...` | Search up to 50 cards by partial name |
+| `GET` | `/card?name=...` | Load one complete card by exact name |
+| `GET` | `/card/substring?name=...&limit=...` | Return lightweight partial-name search summaries |
+| `GET` | `/card/substring?name=...&typeId=...&raceId=...&attributeId=...&archetypeId=...` | Search with optional numeric filters |
+| `GET` | `/card/filters` | List available types, races, and attributes |
+| `GET` | `/card/archetypes?query=...&limit=10` | Return live archetype suggestions |
 | `GET` | `/card/combos?name=...&zone=...` | Find supported combo routes |
 | `GET` | `/card/fusion-materials?source=...&target=...` | Plan legal Fusion Materials |
 | `GET` | `/card/cost-materials?source=...&target=...` | Plan legal effect costs |
@@ -163,6 +199,11 @@ Example:
 ```bash
 curl "http://localhost:8080/yugioh/card/combos?name=Branded%20Fusion"
 ```
+
+The frontend requests 10 results for autocomplete, 50 for ordinary name
+searches, and up to 5,000 lightweight summaries when filters are active. The
+backend enforces a maximum of 5,000 search summaries and 10 archetype
+suggestions per request.
 
 ## Tests and Builds
 
@@ -180,6 +221,7 @@ Check and build the frontend:
 cd frontend
 npm run lint
 npm run build
+npm test
 ```
 
 Build the backend container:
