@@ -17,7 +17,7 @@ public class CardCatalogService {
 
     private static final int MAX_SEARCH_RESULTS = 5_000;
 
-    public record CardSearchSummary(Long id, String name, String type) {
+    public record CardSearchSummary(Long id, String name, String type, String cardImageUrl) {
     }
 
     public record FilterOption(Integer id, String name) {
@@ -91,7 +91,11 @@ public class CardCatalogService {
                         archetypeId,
                         PageRequest.of(0, Math.max(1, Math.min(limit, MAX_SEARCH_RESULTS))))
                 .stream()
-                .map(card -> new CardSearchSummary(card.getId(), card.getName(), card.getType()))
+                .map(card -> new CardSearchSummary(
+                        card.getId(),
+                        card.getName(),
+                        card.getType(),
+                        card.getCardImageUrl()))
                 .toList();
         return cards;
     }
