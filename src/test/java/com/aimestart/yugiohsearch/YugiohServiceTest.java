@@ -24,7 +24,9 @@ class YugiohServiceTest {
     private final CardRepository repository = mock(CardRepository.class);
     private final ComboService service = new ComboService(repository);
     private final YugiohService yugiohService = mock(YugiohService.class);
-    private final CardCatalogService cardCatalogService = new CardCatalogService(yugiohService, repository);
+    private final CardReferenceDataService cardReferenceDataService = mock(CardReferenceDataService.class);
+    private final CardCatalogService cardCatalogService = new CardCatalogService(
+            yugiohService, repository, cardReferenceDataService);
 
     @Test
     void effectPrerequisitesRequireDiscardCostBeforeActivation() {
