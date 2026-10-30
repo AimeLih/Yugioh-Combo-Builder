@@ -83,6 +83,12 @@ SPRING_CACHE_TYPE=simple
 IMPORT_TOKEN=choose_a_private_local_token
 ```
 
+Flyway applies the database schema automatically at backend startup. Cards use
+numeric foreign keys for types, races, attributes, and archetypes, while ordered
+link markers live in a child table. Exact and relationship lookups use normal
+B-tree indexes. Partial case-insensitive searches use PostgreSQL GIN trigram
+indexes on card names/descriptions and searchable reference names.
+
 ### 2. Start the backend
 
 macOS/Linux:
