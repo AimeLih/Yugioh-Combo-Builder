@@ -65,8 +65,29 @@ public class YugiohController {
     }
 
     @GetMapping("/card/substring")
-    public List<Card> getCardBySubstring(@RequestParam String name) {
-        return cardCatalogService.getCardsBySubstring(name);
+    public List<CardCatalogService.CardSearchSummary> getCardBySubstring(
+            @RequestParam(defaultValue = "") String name,
+            @RequestParam(required = false) Integer typeId,
+            @RequestParam(required = false) Integer raceId,
+            @RequestParam(required = false) Integer attributeId,
+            @RequestParam(required = false) Integer archetypeId,
+            @RequestParam(defaultValue = "50") int limit
+    ) {
+        return cardCatalogService.getCardsBySubstring(
+                name, typeId, raceId, attributeId, archetypeId, limit);
+    }
+
+    @GetMapping("/card/filters")
+    public CardCatalogService.CardFilterOptions getCardFilters() {
+        return cardCatalogService.getFilterOptions();
+    }
+
+    @GetMapping("/card/archetypes")
+    public List<CardCatalogService.FilterOption> getArchetypeSuggestions(
+            @RequestParam String query,
+            @RequestParam(defaultValue = "5") int limit
+    ) {
+        return cardCatalogService.getArchetypeSuggestions(query, limit);
     }
 
     public record ImportResult(int cardsAdded) {}
