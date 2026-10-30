@@ -1572,6 +1572,18 @@ function CardListItem({ card, selected, onClick }) {
 }
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8080'
+const EMPTY_FILTERS = { typeId: '', raceId: '', attributeId: '', archetypeId: '' }
+const AUTOCOMPLETE_LIMIT = 10
+const SEARCH_RESULT_LIMIT = 50
+const FILTERED_SEARCH_RESULT_LIMIT = 5000
+
+function cardSearchUrl(query, limit, filters) {
+  const params = new URLSearchParams({ name: query.trim(), limit: String(limit) })
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) params.set(key, value)
+  })
+  return `${API}/yugioh/card/substring?${params}`
+}
 
 export default function App() {
   const comboRequestId = useRef(0)
@@ -1579,8 +1591,15 @@ export default function App() {
   const effectRequestInFlight = useRef(false)
   const effectResolutionInFlight = useRef(false)
   const [query, setQuery] = useState('')
-  const [mode, setMode] = useState('search')
   const [cards, setCards] = useState([])
+  const [nameSuggestions, setNameSuggestions] = useState([])
+  const [nameSuggestionsOpen, setNameSuggestionsOpen] = useState(false)
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [filterOptions, setFilterOptions] = useState({ types: [], races: [], attributes: [] })
+  const [filters, setFilters] = useState(EMPTY_FILTERS)
+  const [archetypeQuery, setArchetypeQuery] = useState('')
+  const [archetypeSuggestions, setArchetypeSuggestions] = useState([])
+  const [archetypeSuggestionsOpen, setArchetypeSuggestionsOpen] = useState(false)
   const [selected, setSelected] = useState(null)
   const [comboPath, setComboPath] = useState([])
   const [comboOptions, setComboOptions] = useState([])
@@ -1606,6 +1625,72 @@ export default function App() {
   const [comboLoading, setComboLoading] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+
+  useEffect(() => {
+    if (!filtersOpen || filterOptions.types.length > 0) return undefined
+    const controller = new AbortController()
+    fetch(`${API}/yugioh/card/filters`, { signal: controller.signal })
+        .then(response => {
+          if (!response.ok) throw new Error('Failed to load filters')
+          return response.json()
+        })
+        .then(setFilterOptions)
+        .catch(fetchError => {
+          if (fetchError.name !== 'AbortError') setError(fetchError.message)
+        })
+    return () => controller.abort()
+  }, [filtersOpen, filterOptions.types.length])
+
+  useEffect(() => {
+    if (!query.trim()) {
+      setNameSuggestions([])
+      return undefined
+    }
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      fetch(cardSearchUrl(query, AUTOCOMPLETE_LIMIT, filters), { signal: controller.signal })
+          .then(response => {
+            if (!response.ok) throw new Error('Failed to load suggestions')
+            return response.json()
+          })
+          .then(setNameSuggestions)
+          .catch(fetchError => {
+            if (fetchError.name !== 'AbortError') setNameSuggestions([])
+          })
+    }, 120)
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [query, filters])
+
+  useEffect(() => {
+    if (!archetypeQuery.trim() || filters.archetypeId) {
+      setArchetypeSuggestions([])
+      return undefined
+    }
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams({
+        query: archetypeQuery.trim(),
+        limit: String(AUTOCOMPLETE_LIMIT),
+      })
+      fetch(`${API}/yugioh/card/archetypes?${params}`, { signal: controller.signal })
+          .then(response => {
+            if (!response.ok) throw new Error('Failed to load archetypes')
+            return response.json()
+          })
+          .then(setArchetypeSuggestions)
+          .catch(fetchError => {
+            if (fetchError.name !== 'AbortError') setArchetypeSuggestions([])
+          })
+    }, 120)
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [archetypeQuery, filters.archetypeId])
+
   const oncePerTurn = oncePerTurnLabel(selected)
   const extender = extenderLabel(selected)
 
@@ -1680,6 +1765,45 @@ export default function App() {
     setPendulumPickerOpen(false)
     closeMaterialPicker()
     setError(null)
+  }
+
+  async function openSearchResult(cardSummary) {
+    setLoading(true)
+    setError(null)
+    try {
+      const response = await fetch(
+          `${API}/yugioh/card?name=${encodeURIComponent(cardSummary.name)}`,
+      )
+      if (!response.ok) throw new Error('Card not found')
+      openRootCard(await response.json())
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function selectNameSuggestion(cardSummary) {
+    setQuery(cardSummary.name)
+    setCards([cardSummary])
+    setNameSuggestionsOpen(false)
+    await openSearchResult(cardSummary)
+  }
+
+  function updateFilter(key, value) {
+    setFilters(current => ({ ...current, [key]: value }))
+  }
+
+  function selectArchetype(archetype) {
+    setArchetypeQuery(archetype.name)
+    updateFilter('archetypeId', String(archetype.id))
+    setArchetypeSuggestionsOpen(false)
+  }
+
+  function clearFilters() {
+    setFilters(EMPTY_FILTERS)
+    setArchetypeQuery('')
+    setArchetypeSuggestions([])
   }
 
   function placeSearchResult(destination) {
@@ -2449,25 +2573,26 @@ export default function App() {
 
   async function handleSearch(e) {
     e.preventDefault()
-    if (!query.trim()) return
+    if (!query.trim() && !Object.values(filters).some(Boolean)) return
     setLoading(true)
     setError(null)
     setCards([])
+    setSelected(null)
+    setSelectedEntry(null)
+    setComboPath([])
+    setComboOptions([])
+    setPlacementSelection(null)
+    setNameSuggestionsOpen(false)
 
     try {
-      if (mode === 'exact') {
-        const res = await fetch(`${API}/yugioh/card?name=${encodeURIComponent(query)}`)
-        if (!res.ok) throw new Error('Card not found')
-        const card = await res.json()
-        setCards([card])
-        openRootCard(card)
-      } else {
-        const res = await fetch(`${API}/yugioh/card/substring?name=${encodeURIComponent(query)}`)
-        if (!res.ok) throw new Error('No cards found')
-        const list = await res.json()
-        setCards(list)
-        if (list.length === 1) openRootCard(list[0])
-      }
+      const resultLimit = Object.values(filters).some(Boolean)
+          ? FILTERED_SEARCH_RESULT_LIMIT
+          : SEARCH_RESULT_LIMIT
+      const res = await fetch(cardSearchUrl(query, resultLimit, filters))
+      if (!res.ok) throw new Error('No cards found')
+      const list = await res.json()
+      setCards(list)
+      if (list.length === 0) setError('No cards found')
     } catch (err) {
       setError(err.message)
     } finally {
@@ -2476,6 +2601,7 @@ export default function App() {
   }
 
   const showList = cards.length > 0
+  const activeFilterCount = Object.values(filters).filter(Boolean).length
 
   return (
       <div className="app">
@@ -2488,33 +2614,129 @@ export default function App() {
         <main className="app-main">
           <form className="search-form" onSubmit={handleSearch}>
             <div className="search-row">
-              <input
-                  className="search-input"
-                  type="text"
-                  placeholder="Enter a card name..."
-                  value={query}
-                  onChange={e => setQuery(e.target.value)}
-              />
+              <div className="autocomplete">
+                <input
+                    className="search-input"
+                    type="text"
+                    placeholder="Enter a card name..."
+                    value={query}
+                    role="combobox"
+                    aria-label="Card name"
+                    aria-expanded={nameSuggestionsOpen && nameSuggestions.length > 0}
+                    aria-controls="card-name-suggestions"
+                    autoComplete="off"
+                    onChange={e => {
+                      setQuery(e.target.value)
+                      setNameSuggestionsOpen(true)
+                    }}
+                    onFocus={() => setNameSuggestionsOpen(true)}
+                    onBlur={() => setNameSuggestionsOpen(false)}
+                />
+                {nameSuggestionsOpen && nameSuggestions.length > 0 && (
+                    <div className="autocomplete-menu" id="card-name-suggestions" role="listbox">
+                      {nameSuggestions.map(card => (
+                          <button
+                              key={card.id}
+                              type="button"
+                              className="autocomplete-option"
+                              role="option"
+                              aria-selected="false"
+                              onMouseDown={event => event.preventDefault()}
+                              onClick={() => selectNameSuggestion(card)}
+                          >
+                            <span>{card.name}</span>
+                            <small>{card.type}</small>
+                          </button>
+                      ))}
+                    </div>
+                )}
+              </div>
               <button className="search-btn" type="submit" disabled={loading}>
                 {loading ? '...' : 'Search'}
               </button>
-            </div>
-            <div className="search-modes">
               <button
                   type="button"
-                  className={`mode-pill${mode === 'search' ? ' active' : ''}`}
-                  onClick={() => setMode('search')}
+                  className={`filter-btn${filtersOpen ? ' active' : ''}`}
+                  aria-expanded={filtersOpen}
+                  aria-controls="card-filters"
+                  onClick={() => setFiltersOpen(open => !open)}
               >
-                By Name
-              </button>
-              <button
-                  type="button"
-                  className={`mode-pill${mode === 'exact' ? ' active' : ''}`}
-                  onClick={() => setMode('exact')}
-              >
-                Exact Match
+                Filter{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
               </button>
             </div>
+            {filtersOpen && (
+                <div className="filter-panel" id="card-filters">
+                  <label>
+                    <span>Type</span>
+                    <select value={filters.typeId} onChange={e => updateFilter('typeId', e.target.value)}>
+                      <option value="">All types</option>
+                      {filterOptions.types.map(option => (
+                          <option key={option.id} value={option.id}>{option.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Race</span>
+                    <select value={filters.raceId} onChange={e => updateFilter('raceId', e.target.value)}>
+                      <option value="">All races</option>
+                      {filterOptions.races.map(option => (
+                          <option key={option.id} value={option.id}>{option.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Attribute</span>
+                    <select value={filters.attributeId} onChange={e => updateFilter('attributeId', e.target.value)}>
+                      <option value="">All attributes</option>
+                      {filterOptions.attributes.map(option => (
+                          <option key={option.id} value={option.id}>{option.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="archetype-filter">
+                    <span>Archetype</span>
+                    <div className="autocomplete">
+                      <input
+                          type="text"
+                          value={archetypeQuery}
+                          placeholder="Type an archetype..."
+                          role="combobox"
+                          aria-label="Archetype"
+                          aria-expanded={archetypeSuggestionsOpen && archetypeSuggestions.length > 0}
+                          aria-controls="archetype-suggestions"
+                          autoComplete="off"
+                          onChange={e => {
+                            setArchetypeQuery(e.target.value)
+                            updateFilter('archetypeId', '')
+                            setArchetypeSuggestionsOpen(true)
+                          }}
+                          onFocus={() => setArchetypeSuggestionsOpen(true)}
+                          onBlur={() => setArchetypeSuggestionsOpen(false)}
+                      />
+                      {archetypeSuggestionsOpen && archetypeSuggestions.length > 0 && (
+                          <div className="autocomplete-menu" id="archetype-suggestions" role="listbox">
+                            {archetypeSuggestions.map(archetype => (
+                                <button
+                                    key={archetype.id}
+                                    type="button"
+                                    className="autocomplete-option"
+                                    role="option"
+                                    aria-selected={filters.archetypeId === String(archetype.id)}
+                                    onMouseDown={event => event.preventDefault()}
+                                    onClick={() => selectArchetype(archetype)}
+                                >
+                                  <span>{archetype.name}</span>
+                                </button>
+                            ))}
+                          </div>
+                      )}
+                    </div>
+                  </label>
+                  <button type="button" className="clear-filter-btn" onClick={clearFilters} disabled={activeFilterCount === 0}>
+                    Clear filters
+                  </button>
+                </div>
+            )}
           </form>
 
           {error && <div className="error-msg">{error}</div>}
@@ -2535,7 +2757,7 @@ export default function App() {
                               key={c.id}
                               card={c}
                               selected={selected?.id === c.id}
-                              onClick={() => openRootCard(c)}
+                              onClick={() => openSearchResult(c)}
                           />
                       ))}
                     </div>
