@@ -1565,8 +1565,18 @@ function CardListItem({ card, selected, onClick }) {
           style={{ borderLeftColor: color }}
           onClick={onClick}
       >
-        <div className="card-list-name">{card.name}</div>
-        <div className="card-list-type" style={{ color }}>{card.type}</div>
+        {card.cardImageUrl && (
+            <img
+                className="card-list-thumbnail"
+                src={card.cardImageUrl}
+                alt=""
+                loading="lazy"
+            />
+        )}
+        <div className="card-list-copy">
+          <div className="card-list-name">{card.name}</div>
+          <div className="card-list-type" style={{ color }}>{card.type}</div>
+        </div>
       </div>
   )
 }
@@ -2669,7 +2679,7 @@ export default function App() {
                   <label>
                     <span>Type</span>
                     <select value={filters.typeId} onChange={e => updateFilter('typeId', e.target.value)}>
-                      <option value="">All types</option>
+                      <option value="">All Types</option>
                       {filterOptions.types.map(option => (
                           <option key={option.id} value={option.id}>{option.name}</option>
                       ))}
@@ -2678,7 +2688,7 @@ export default function App() {
                   <label>
                     <span>Race</span>
                     <select value={filters.raceId} onChange={e => updateFilter('raceId', e.target.value)}>
-                      <option value="">All races</option>
+                      <option value="">All Races</option>
                       {filterOptions.races.map(option => (
                           <option key={option.id} value={option.id}>{option.name}</option>
                       ))}
@@ -2687,7 +2697,7 @@ export default function App() {
                   <label>
                     <span>Attribute</span>
                     <select value={filters.attributeId} onChange={e => updateFilter('attributeId', e.target.value)}>
-                      <option value="">All attributes</option>
+                      <option value="">All Attributes</option>
                       {filterOptions.attributes.map(option => (
                           <option key={option.id} value={option.id}>{option.name}</option>
                       ))}
