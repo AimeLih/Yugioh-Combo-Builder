@@ -77,6 +77,8 @@ const ZONE_BUTTON_LABELS = {
   extraDeck: 'Extra Deck',
 }
 
+const CARD_RESULT_CLICK_COOLDOWN_MS = 700
+
 function emptyZones() {
   return {
     monsterZone: [],
@@ -1630,6 +1632,8 @@ function cardSearchUrl(query, limit, filters) {
 export default function App() {
   const comboRequestId = useRef(0)
   const cardDetailRequestId = useRef(0)
+  const cardDetailPanelRef = useRef(null)
+  const cardResultClickLocks = useRef(new Map())
   const zoneInstanceId = useRef(0)
   const effectRequestInFlight = useRef(false)
   const effectResolutionInFlight = useRef(false)
@@ -1813,7 +1817,16 @@ export default function App() {
   }
 
   async function openSearchResult(cardSummary) {
+    const now = Date.now()
+    const existingLock = cardResultClickLocks.current.get(cardSummary.id)
+    if (existingLock?.inFlight || (existingLock?.cooldownUntil ?? 0) > now) return
+
     const requestId = ++cardDetailRequestId.current
+    cardResultClickLocks.current.set(cardSummary.id, {
+      requestId,
+      inFlight: true,
+      cooldownUntil: now + CARD_RESULT_CLICK_COOLDOWN_MS,
+    })
     setDetailLoading(true)
     setPendingCardId(cardSummary.id)
     setError(null)
@@ -1823,10 +1836,22 @@ export default function App() {
       )
       if (!response.ok) throw new Error('Card not found')
       const card = await response.json()
-      if (cardDetailRequestId.current === requestId) openRootCard(card)
+      if (cardDetailRequestId.current === requestId) {
+        openRootCard(card)
+        requestAnimationFrame(() => {
+          cardDetailPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        })
+      }
     } catch (err) {
       if (cardDetailRequestId.current === requestId) setError(err.message)
     } finally {
+      const currentLock = cardResultClickLocks.current.get(cardSummary.id)
+      if (currentLock?.requestId === requestId) {
+        cardResultClickLocks.current.set(cardSummary.id, {
+          ...currentLock,
+          inFlight: false,
+        })
+      }
       if (cardDetailRequestId.current === requestId) {
         setDetailLoading(false)
         setPendingCardId(null)
@@ -2674,6 +2699,7 @@ export default function App() {
     e.preventDefault()
     if (!query.trim() && !Object.values(filters).some(Boolean)) return
     setLoading(true)
+    cardResultClickLocks.current.clear()
     cardDetailRequestId.current += 1
     setDetailLoading(false)
     setPendingCardId(null)
@@ -2866,7 +2892,7 @@ export default function App() {
                     </div>
                 )}
 
-                <div className="card-detail-panel">
+                <div ref={cardDetailPanelRef} className="card-detail-panel">
                   {selected ? (
                       <CardDetail
                           card={selected}
