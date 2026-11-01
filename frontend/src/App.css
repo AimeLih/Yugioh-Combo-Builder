@@ -369,7 +369,19 @@ body { background: #060a12; }
 }
 
 .card-list-copy {
+  flex: 1;
   min-width: 0;
+}
+
+.card-list-loading {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border: 2px solid #30394e;
+  border-top-color: #c9a227;
+  border-right-color: #e8bf3e;
+  border-radius: 50%;
+  animation: spin 0.7s cubic-bezier(0.5, 0.1, 0.5, 0.9) infinite;
 }
 
 .card-list-item:hover {
@@ -409,7 +421,6 @@ body { background: #060a12; }
   justify-content: center;
   align-self: flex-start;
 }
-
 
 .wiki-card {
   width: 100%;
