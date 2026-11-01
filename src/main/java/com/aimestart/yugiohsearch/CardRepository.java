@@ -23,6 +23,9 @@ public interface CardRepository extends JpaRepository<Card, Long> {
         String getName();
         String getType();
         String getCardImageUrl();
+        String getDescription();
+        Integer getLevel();
+        Integer getLinkvalue();
     }
 
     @EntityGraph(value = "Card.details")
@@ -35,7 +38,10 @@ public interface CardRepository extends JpaRepository<Card, Long> {
             select card.id as id,
                    card.name as name,
                    typeReference.name as type,
-                   card.cardImageUrl as cardImageUrl
+                   card.cardImageUrl as cardImageUrl,
+                   card.description as description,
+                   card.level as level,
+                   card.linkvalue as linkvalue
             from Card card
             join card.typeReference typeReference
             left join card.raceReference raceReference
