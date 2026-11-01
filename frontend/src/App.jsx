@@ -8,7 +8,7 @@ import {
   specialSummonsSelfFromZone,
   spellTrapResolutionZone,
 } from './effectResolution.js'
-import { splitCardEffects } from './effectParsing.js'
+import { isPassiveEffectText, splitCardEffects } from './effectParsing.js'
 
 function typeColor(type) {
   if (!type) return '#1a3a5c'
@@ -262,6 +262,10 @@ function matchesMaterialDescriptor(entry, descriptor) {
   const name = (card.name || '').toLowerCase()
   const archetype = (card.archetype || '').toLowerCase()
 
+  const requiredLevels = [...rule.matchAll(/\blevel\s+(\d+)\b/g)]
+      .map(match => Number(match[1]))
+  if (requiredLevels.length > 0 && !requiredLevels.includes(Number(card.level))) return false
+
   if (rule.includes('non-tuner') && type.includes('tuner')) return false
   if (!rule.includes('non-tuner') && /\btuner\b/.test(rule) && !type.includes('tuner')) return false
   if (rule.includes('effect monster') && (!type.includes('effect') || isTokenCard(card))) return false
@@ -444,6 +448,7 @@ function cardEffectOptions(card, zone = null, entry = null) {
 
   const options = sections.flatMap(section => splitCardEffects(section.text)
       .filter(text => !/^[●•▪◦-]\s*/.test(text))
+      .filter(text => !isPassiveEffectText(text))
       .filter(text => !/^you can only (?:use|activate)\b/i.test(text))
       .filter(text => !/^you cannot special summon\b/i.test(text))
       .filter(text => /\b(you can|add|draw|summon|place|set|send|discard|tribute|banish|destroy|return|target|activate)\b/i.test(text))
@@ -745,13 +750,12 @@ function EffectPicker({ selection, activatedEffects, busy, onChoose, onCancel })
             {selection.effects.map((effect, index) => {
               const used = activatedEffects.includes(effectUsageKey(selection.entry, effect))
               const unavailableReason = effect.unavailableReason || ''
-              const unavailable = used || Boolean(unavailableReason)
               const optionalClause = optionalEffectClause(effect.text)
               if (optionalClause) {
                 return (
                     <div
                         key={`${effect.sourceZone}-${effect.text}`}
-                        className={`effect-choice effect-choice-optional${unavailable ? ' is-used' : ''}`}
+                        className={`effect-choice effect-choice-optional${used ? ' is-used' : ''}`}
                     >
                       <span className="effect-choice-number">Effect {index + 1}</span>
                       <span className="effect-choice-zone">From: {effect.sourceZone}</span>
@@ -759,7 +763,14 @@ function EffectPicker({ selection, activatedEffects, busy, onChoose, onCancel })
                       {used
                         ? <span className="effect-choice-used">Already activated</span>
                         : unavailableReason
-                          ? <span className="effect-choice-unavailable">Unavailable: {unavailableReason}</span>
+                          ? (
+                            <div className="optional-effect-actions">
+                              <span className="effect-choice-unavailable">Unavailable: {unavailableReason}</span>
+                              <button type="button" onClick={() => onChoose(effect, false)} disabled={busy}>
+                                Check Again
+                              </button>
+                            </div>
+                          )
                         : (
                             <div className="optional-effect-actions">
                               <button type="button" onClick={() => onChoose(effect, false)} disabled={busy}>
@@ -779,7 +790,7 @@ function EffectPicker({ selection, activatedEffects, busy, onChoose, onCancel })
                       type="button"
                       className="effect-choice"
                       onClick={() => onChoose(effect, false)}
-                      disabled={unavailable || busy}
+                      disabled={used || busy}
                       title={unavailableReason || undefined}
                   >
                     <span className="effect-choice-number">Effect {index + 1}</span>
@@ -1570,13 +1581,14 @@ function CardDetail({
   )
 }
 
-function CardListItem({ card, selected, onClick }) {
+function CardListItem({ card, selected, loading, onClick }) {
   const color = typeColor(card.type)
   return (
       <div
           className={`card-list-item${selected ? ' selected' : ''}`}
           style={{ borderLeftColor: color }}
           onClick={onClick}
+          aria-busy={loading}
       >
         {card.cardImageUrl && (
             <img
@@ -1590,6 +1602,13 @@ function CardListItem({ card, selected, onClick }) {
           <div className="card-list-name">{card.name}</div>
           <div className="card-list-type" style={{ color }}>{card.type}</div>
         </div>
+        {loading && (
+            <div
+                className="card-list-loading"
+                role="status"
+                aria-label={`Loading ${card.name} details`}
+            />
+        )}
       </div>
   )
 }
@@ -1610,6 +1629,7 @@ function cardSearchUrl(query, limit, filters) {
 
 export default function App() {
   const comboRequestId = useRef(0)
+  const cardDetailRequestId = useRef(0)
   const zoneInstanceId = useRef(0)
   const effectRequestInFlight = useRef(false)
   const effectResolutionInFlight = useRef(false)
@@ -1647,6 +1667,8 @@ export default function App() {
   const [pendulumPickerOpen, setPendulumPickerOpen] = useState(false)
   const [comboLoading, setComboLoading] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [pendingCardId, setPendingCardId] = useState(null)
   const [error, setError] = useState(null)
 
   useEffect(() => {
@@ -1791,18 +1813,24 @@ export default function App() {
   }
 
   async function openSearchResult(cardSummary) {
-    setLoading(true)
+    const requestId = ++cardDetailRequestId.current
+    setDetailLoading(true)
+    setPendingCardId(cardSummary.id)
     setError(null)
     try {
       const response = await fetch(
           `${API}/yugioh/card?name=${encodeURIComponent(cardSummary.name)}`,
       )
       if (!response.ok) throw new Error('Card not found')
-      openRootCard(await response.json())
+      const card = await response.json()
+      if (cardDetailRequestId.current === requestId) openRootCard(card)
     } catch (err) {
-      setError(err.message)
+      if (cardDetailRequestId.current === requestId) setError(err.message)
     } finally {
-      setLoading(false)
+      if (cardDetailRequestId.current === requestId) {
+        setDetailLoading(false)
+        setPendingCardId(null)
+      }
     }
   }
 
@@ -1895,7 +1923,9 @@ export default function App() {
     setActiveZoneContext(zone)
     setActiveEffect(null)
     setComboOptions([])
-    setComboPath([entry.card])
+    setComboPath(previous => previous.at(-1)?.id === entry.card.id
+      ? previous
+      : [...previous, entry.card])
     setEffectSelection(null)
     setPlacementSelection(null)
     setError(null)
@@ -2010,6 +2040,18 @@ export default function App() {
       return
     }
 
+    const extraMonsterZoneWillBeOpen = zones.extraMonsterZone.every(entry => selectedIds.has(entry.instanceId))
+    const remainingMainMonsters = zones.monsterZone.filter(entry => !selectedIds.has(entry.instanceId)).length
+    const destinationZone = extraMonsterZoneWillBeOpen
+      ? 'extraMonsterZone'
+      : linkedMainZoneCapacity(zones) > 0 && remainingMainMonsters < 5
+        ? 'monsterZone'
+        : null
+    if (!destinationZone) {
+      setError('No legal Extra Monster Zone or linked Main Monster Zone is available.')
+      return
+    }
+
     const summonKind = extraDeckKind(card)
     const summonedEntry = {
       ...zoneEntry(card, `${summonKind.toLowerCase()}-summon`),
@@ -2035,7 +2077,7 @@ export default function App() {
           }
         }
       }
-      next.monsterZone.push(summonedEntry)
+      next[destinationZone].push(summonedEntry)
       return next
     })
     setSelected(card)
@@ -2043,10 +2085,10 @@ export default function App() {
     setComboPath(prev => [...prev, card])
     setComboOptions([])
     setActiveEffect(null)
-    setActiveZoneContext('monsterZone')
+    setActiveZoneContext(destinationZone)
     setExtraDeckPickerOpen(false)
     setError(null)
-    promptOnSummonEffects(card, summonedEntry)
+    promptOnSummonEffects(card, summonedEntry, destinationZone)
   }
 
   function openPendulumSummonPicker() {
@@ -2274,8 +2316,11 @@ export default function App() {
       const effectQuery = activeEffect?.text
         ? `&effect=${encodeURIComponent(activeEffect.text)}`
         : ''
+      const handQuery = !isPaidFusion
+        ? `&handOnly=true${zones.hand.map(entry => `&hand=${encodeURIComponent(entry.card.name)}`).join('')}`
+        : ''
       const response = await fetch(
-          `${API}/yugioh/card/${plannerPath}?source=${encodeURIComponent(selected.name)}&target=${encodeURIComponent(option.card.name)}${effectQuery}`,
+          `${API}/yugioh/card/${plannerPath}?source=${encodeURIComponent(selected.name)}&target=${encodeURIComponent(option.card.name)}${effectQuery}${handQuery}`,
       )
       if (!response.ok) throw new Error('Could not determine legal cards for this route cost.')
       setMaterialPlan(await response.json())
@@ -2448,7 +2493,7 @@ export default function App() {
     setEffectInteractionPending(true)
     try {
       const { card, entry, zone } = effectSelection
-    const prerequisite = effect.prerequisitesChecked
+    const prerequisite = effect.prerequisitesChecked && !effect.unavailableReason
       ? {
           available: !effect.unavailableReason,
           reason: effect.unavailableReason || '',
@@ -2459,7 +2504,7 @@ export default function App() {
       ...effect,
       prerequisitesChecked: true,
       legalSummonTargets: prerequisite.legalSummonTargets,
-      ...(!prerequisite.available ? { unavailableReason: prerequisite.reason } : {}),
+      unavailableReason: prerequisite.available ? '' : prerequisite.reason,
     }
     const unavailableReason = validatedEffect.unavailableReason
     if (unavailableReason) {
@@ -2629,6 +2674,9 @@ export default function App() {
     e.preventDefault()
     if (!query.trim() && !Object.values(filters).some(Boolean)) return
     setLoading(true)
+    cardDetailRequestId.current += 1
+    setDetailLoading(false)
+    setPendingCardId(null)
     setError(null)
     setCards([])
     setSelected(null)
@@ -2810,7 +2858,8 @@ export default function App() {
                           <CardListItem
                               key={c.id}
                               card={c}
-                              selected={selected?.id === c.id}
+                              selected={(pendingCardId ?? selected?.id) === c.id}
+                              loading={detailLoading && pendingCardId === c.id}
                               onClick={() => openSearchResult(c)}
                           />
                       ))}
