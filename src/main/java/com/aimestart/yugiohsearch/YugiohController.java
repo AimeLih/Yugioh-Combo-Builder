@@ -59,9 +59,15 @@ public class YugiohController {
     public ComboService.FusionMaterialPlan getCostMaterials(
             @RequestParam String source,
             @RequestParam String target,
-            @RequestParam(required = false) String effect
+            @RequestParam(required = false) String effect,
+            @RequestParam(defaultValue = "false") boolean handOnly,
+            @RequestParam(required = false) List<String> hand
     ) {
-        return comboService.getCardCostPlan(source, target, effect);
+        return comboService.getCardCostPlan(
+                source,
+                target,
+                effect,
+                handOnly ? (hand == null ? List.of() : hand) : null);
     }
 
     @GetMapping("/card/substring")
