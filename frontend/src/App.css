@@ -415,6 +415,7 @@ body { background: #060a12; }
 
 
 .card-detail-panel {
+  scroll-margin-top: 1rem;
   flex: 1;
   min-width: 0;
   display: flex;
