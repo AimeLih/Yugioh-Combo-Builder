@@ -43,6 +43,38 @@ class YugiohServiceTest {
     }
 
     @Test
+    void constrainedDiscardDoesNotConsumeActivationUntilALegalCardIsInHand() {
+        String effect = "You can discard 1 other \"Swordsoul\" card or 1 other Wyrm monster; "
+                + "Special Summon this card from your hand.";
+        Card longyuan = card(1, "Swordsoul Strategist Longyuan", effect,
+                "Effect Monster", "Swordsoul");
+        longyuan.setRace("Wyrm");
+        Card illegal = card(2, "Unrelated Warrior", "A Warrior.", "Effect Monster", "Other");
+        illegal.setRace("Warrior");
+        Card legal = card(3, "Tenyi Spirit - Ashuna", "A Wyrm.", "Effect Monster", "Tenyi");
+        legal.setRace("Wyrm");
+        when(repository.getCardByName(longyuan.getName())).thenReturn(longyuan);
+        when(repository.findAllByNameIn(org.mockito.ArgumentMatchers.anyCollection()))
+                .thenAnswer(invocation -> {
+                    java.util.Collection<String> names = invocation.getArgument(0);
+                    return names.contains(legal.getName()) ? List.of(longyuan, legal) : List.of(longyuan, illegal);
+                });
+
+        ComboService.EffectPrerequisiteResult unavailable = service.checkEffectPrerequisites(
+                new ComboService.EffectPrerequisiteRequest(
+                        longyuan.getName(), effect, "hand",
+                        Map.of("hand", List.of(longyuan.getName(), illegal.getName()))));
+        ComboService.EffectPrerequisiteResult retryAvailable = service.checkEffectPrerequisites(
+                new ComboService.EffectPrerequisiteRequest(
+                        longyuan.getName(), effect, "hand",
+                        Map.of("hand", List.of(longyuan.getName(), legal.getName()))));
+
+        assertFalse(unavailable.available());
+        assertTrue(unavailable.reason().contains("legal"));
+        assertTrue(retryAvailable.available());
+    }
+
+    @Test
     void effectPrerequisitesRequireFusionMaterialsInNamedZones() {
         String effect = "If this card is Fusion Summoned: You can Fusion Summon 1 Level 8 or lower "
                 + "Fusion Monster from your Extra Deck, except \"Albion the Branded Dragon\", by banishing "
@@ -487,6 +519,87 @@ class YugiohServiceTest {
     }
 
     @Test
+    void discardCostChecksOnlyCardsCurrentlyInTheHand() {
+        String effect = "You can discard 1 other \"Swordsoul\" card or 1 other Wyrm monster; "
+                + "Special Summon this card from your hand.";
+        Card source = card(1, "Swordsoul Strategist Longyuan", effect,
+                "Effect Monster", "Swordsoul");
+        source.setRace("Wyrm");
+        Card target = card(2, "Swordsoul Token", "A Token.", "Token Monster", "Swordsoul");
+        Card swordsoulCard = card(3, "Swordsoul Blackout", "A Trap.", "Trap Card", "Swordsoul");
+        Card wyrmCard = card(4, "Tenyi Spirit - Ashuna", "A Wyrm.", "Effect Monster", "Tenyi");
+        wyrmCard.setRace("Wyrm");
+        Card illegalCard = card(5, "Unrelated Warrior", "Not a legal discard.",
+                "Effect Monster", "Other");
+        illegalCard.setRace("Warrior");
+
+        when(repository.getCardByName(source.getName())).thenReturn(source);
+        when(repository.getCardByName(target.getName())).thenReturn(target);
+        when(repository.findAllByNameIn(org.mockito.ArgumentMatchers.anyCollection()))
+                .thenReturn(List.of(source, swordsoulCard, wyrmCard, illegalCard));
+
+        ComboService.FusionMaterialPlan plan = service.getCardCostPlan(
+                source.getName(),
+                target.getName(),
+                effect,
+                List.of(source.getName(), swordsoulCard.getName(), wyrmCard.getName(), illegalCard.getName()));
+
+        assertEquals(List.of(swordsoulCard.getName(), wyrmCard.getName()),
+                plan.slots().get(0).eligibleCards().stream().map(ComboService.MaterialCardOption::name).toList());
+        verify(repository, never()).findAllProjectedBy();
+    }
+
+    @Test
+    void namedTokenSummonReturnsTheTokenInsteadOfArchetypeMonsters() {
+        String effect = "You can discard 1 other \"Swordsoul\" card or 1 other Wyrm monster; "
+                + "Special Summon this card from your hand, then you can Special Summon 1 "
+                + "\"Swordsoul Token\" (Wyrm/Tuner/WATER/Level 4/ATK 0/DEF 0).";
+        Card longyuan = card(1, "Swordsoul Strategist Longyuan", effect,
+                "Effect Monster", "Swordsoul");
+        Card undesirableMonster = card(2, "Swordsoul of Mo Ye",
+                "If this card is Summoned: You can Special Summon 1 Token.",
+                "Effect Monster", "Swordsoul");
+        stubRelatedCards(longyuan, List.of(undesirableMonster));
+
+        List<ComboService.ComboOption> options = service.getPossibleCombos(
+                longyuan.getName(), "hand", effect);
+
+        assertEquals(1, options.size());
+        Card token = options.get(0).card();
+        assertEquals("Swordsoul Token", token.getName());
+        assertTrue(token.getType().contains("Token"));
+        assertTrue(token.getType().contains("Tuner"));
+        assertEquals("Wyrm", token.getRace());
+        assertEquals("WATER", token.getAttribute());
+        assertEquals(4, token.getLevel());
+        assertEquals(0, token.getAtk());
+        assertEquals(0, token.getDef());
+    }
+
+    @Test
+    void namedTokenSummonsAreArchetypeAgnostic() {
+        String effect = "Discard 1 \"Harpie\" card; Special Summon 2 "
+                + "\"Harpie Tokens\" [Winged Beast-Type/WIND/Level 4/ATK 1300/DEF 1400].";
+        Card source = card(1, "Harpie Token Caller", effect, "Spell Card", "Harpie");
+        Card undesirableMonster = card(2, "Harpie Harpist", "A Harpie monster.",
+                "Effect Monster", "Harpie");
+        stubRelatedCards(source, List.of(undesirableMonster));
+
+        List<ComboService.ComboOption> options = service.getPossibleCombos(
+                source.getName(), "spellTrapZone", effect);
+
+        assertEquals(1, options.size());
+        Card token = options.get(0).card();
+        assertEquals("Harpie Tokens", token.getName());
+        assertTrue(token.getType().contains("Token"));
+        assertEquals("Winged Beast", token.getRace());
+        assertEquals("WIND", token.getAttribute());
+        assertEquals(4, token.getLevel());
+        assertEquals(1300, token.getAtk());
+        assertEquals(1400, token.getDef());
+    }
+
+    @Test
     void revealingACardDoesNotCreateASearchOrMovementRoute() {
         Card source = card(1, "Reveal Only",
                 "Reveal 1 \"Test\" card in your hand; this card gains 500 ATK.",
@@ -753,6 +866,31 @@ class YugiohServiceTest {
         List<ComboService.ComboOption> options = service.getPossibleCombos(source.getName(), null, null);
 
         assertTrue(options.isEmpty());
+    }
+
+    @Test
+    void cardSearchSummariesIncludeExtraDeckLegalityData() {
+        CardRepository.CardSearchSummaryView linkuriboh = mock(CardRepository.CardSearchSummaryView.class);
+        when(linkuriboh.getId()).thenReturn(1L);
+        when(linkuriboh.getName()).thenReturn("Linkuriboh");
+        when(linkuriboh.getType()).thenReturn("Link Monster");
+        when(linkuriboh.getDescription()).thenReturn("1 Level 1 monster");
+        when(linkuriboh.getLinkvalue()).thenReturn(1);
+        when(repository.findSearchSummariesByName(
+                org.mockito.ArgumentMatchers.eq("linku"),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any(org.springframework.data.domain.Pageable.class)))
+                .thenReturn(List.of(linkuriboh));
+
+        List<CardCatalogService.CardSearchSummary> results = cardCatalogService.getCardsBySubstring(
+                "linku", null, null, null, null, 20);
+
+        assertEquals(1, results.size());
+        assertEquals("1 Level 1 monster", results.get(0).description());
+        assertEquals(1, results.get(0).linkvalue());
     }
 
     @Test
