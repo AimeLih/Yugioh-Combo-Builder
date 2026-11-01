@@ -17,7 +17,15 @@ public class CardCatalogService {
 
     private static final int MAX_SEARCH_RESULTS = 5_000;
 
-    public record CardSearchSummary(Long id, String name, String type, String cardImageUrl) {
+    public record CardSearchSummary(
+            Long id,
+            String name,
+            String type,
+            String cardImageUrl,
+            String description,
+            Integer level,
+            Integer linkvalue
+    ) {
     }
 
     public record FilterOption(Integer id, String name) {
@@ -95,7 +103,10 @@ public class CardCatalogService {
                         card.getId(),
                         card.getName(),
                         card.getType(),
-                        card.getCardImageUrl()))
+                        card.getCardImageUrl(),
+                        card.getDescription(),
+                        card.getLevel(),
+                        card.getLinkvalue()))
                 .toList();
         return cards;
     }
