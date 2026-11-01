@@ -239,6 +239,14 @@ public class ComboService {
             return false;
         }
 
+        Matcher namedTokenSummon = Pattern.compile(
+                "special summon\\s+(?:up to\\s+)?(?:\\d+|one|an?|any number of)\\s+\"([^\"]+ tokens?)\"",
+                Pattern.CASE_INSENSITIVE)
+                .matcher(effectText);
+        if (namedTokenSummon.find()) {
+            return target.getName().equalsIgnoreCase(namedTokenSummon.group(1));
+        }
+
         List<String> relevantQuotedTerms = extractQuotedTerms(effectText).stream()
                 .filter(term -> !safeLower(term).equals(safeLower(source.getName())))
                 .toList();
@@ -332,6 +340,15 @@ public class ComboService {
             String targetName,
             String selectedEffect
     ) {
+        return getCardCostPlan(sourceName, targetName, selectedEffect, null);
+    }
+
+    public FusionMaterialPlan getCardCostPlan(
+            String sourceName,
+            String targetName,
+            String selectedEffect,
+            List<String> candidateNames
+    ) {
         Card source = cardRepository.getCardByName(sourceName);
         Card target = cardRepository.getCardByName(targetName);
         if (source == null || target == null) {
@@ -357,13 +374,28 @@ public class ComboService {
             String requirement = payment.group(3)
                     .replaceFirst("(?i)^(?:other|of your)\\s+", "")
                     .trim();
-            List<MaterialCardOption> eligibleCards = cardRepository.findAllProjectedBy().stream()
-                    .filter(card -> matchesGeneralCostRequirement(card, requirement))
-                    .sorted(Comparator.comparing(
-                            CardRepository.CostCardView::getName,
-                            String.CASE_INSENSITIVE_ORDER))
-                    .map(card -> new MaterialCardOption(card.getId(), card.getName(), card.getType()))
-                    .collect(Collectors.toList());
+            List<MaterialCardOption> eligibleCards;
+            if (candidateNames != null) {
+                eligibleCards = cardRepository.findAllByNameIn(new LinkedHashSet<>(candidateNames)).stream()
+                        .filter(card -> !safeLower(cost).contains("other")
+                                || !card.getName().equalsIgnoreCase(source.getName()))
+                        .filter(card -> matchesGeneralCostRequirement(
+                                card.getName(), card.getType(), card.getArchetype(), card.getRace(), requirement))
+                        .sorted(Comparator.comparing(Card::getName, String.CASE_INSENSITIVE_ORDER))
+                        .map(this::toMaterialCardOption)
+                        .collect(Collectors.toList());
+            } else {
+                eligibleCards = cardRepository.findAllProjectedBy().stream()
+                        .filter(card -> !safeLower(cost).contains("other")
+                                || !card.getName().equalsIgnoreCase(source.getName()))
+                        .filter(card -> matchesGeneralCostRequirement(
+                                card.getName(), card.getType(), card.getArchetype(), null, requirement))
+                        .sorted(Comparator.comparing(
+                                CardRepository.CostCardView::getName,
+                                String.CASE_INSENSITIVE_ORDER))
+                        .map(card -> new MaterialCardOption(card.getId(), card.getName(), card.getType()))
+                        .collect(Collectors.toList());
+            }
             slots.add(new FusionMaterialSlot(
                     requirement,
                     Integer.parseInt(payment.group(2)),
@@ -686,18 +718,38 @@ public class ComboService {
                     : "This effect requires discarding this card from the Hand.";
         }
 
-        Matcher discard = Pattern.compile("discard\\s+(\\d+|one|a)\\s+(?:other\\s+)?cards?", Pattern.CASE_INSENSITIVE)
+        Matcher discard = Pattern.compile(
+                "discard\\s+(\\d+|one|a)\\s+(.+)$",
+                Pattern.CASE_INSENSITIVE)
                 .matcher(costClause);
         if (discard.find()) {
             int required = wordCount(discard.group(1));
-            int available = hand.size();
-            if ("hand".equalsIgnoreCase(sourceZone)
-                    && (lowerCost.contains("other card") || lowerCost.contains("special summon this card"))) {
-                available -= (int) hand.stream().filter(name -> name.equalsIgnoreCase(source.getName())).findFirst().stream().count();
-            }
-            if (available < required) {
+            boolean excludesSource = "hand".equalsIgnoreCase(sourceZone)
+                    && (lowerCost.contains("other") || lowerCost.contains("special summon this card"));
+            int possibleCards = hand.size() - (excludesSource
+                    ? (int) hand.stream().filter(name -> name.equalsIgnoreCase(source.getName())).findFirst().stream().count()
+                    : 0);
+            if (possibleCards < required) {
                 return "This effect requires " + required + " card" + (required == 1 ? "" : "s")
                         + " in the Hand to discard.";
+            }
+
+            String requirement = discard.group(2)
+                    .replaceFirst("(?i)^(?:other|of your)\\s+", "")
+                    .trim();
+            Map<String, Card> handCards = cardsByName(
+                    cardRepository.findAllByNameIn(new LinkedHashSet<>(hand)),
+                    Collections.emptyList());
+            long available = hand.stream()
+                    .filter(name -> !excludesSource || !name.equalsIgnoreCase(source.getName()))
+                    .map(name -> handCards.get(safeLower(name)))
+                    .filter(Objects::nonNull)
+                    .filter(card -> matchesGeneralCostRequirement(
+                            card.getName(), card.getType(), card.getArchetype(), card.getRace(), requirement))
+                    .count();
+            if (available < required) {
+                return "This effect requires " + required + " legal " + requirement
+                        + (required == 1 ? "" : "s") + " in the Hand to discard.";
             }
         }
 
@@ -1241,9 +1293,20 @@ public class ComboService {
                 : cardValue <= threshold;
     }
 
-    private boolean matchesGeneralCostRequirement(CardRepository.CostCardView card, String requirement) {
+    private boolean matchesGeneralCostRequirement(
+            String cardName,
+            String cardType,
+            String cardArchetype,
+            String cardRace,
+            String requirement
+    ) {
         String normalized = safeLower(requirement);
-        String type = safeLower(card.getType());
+        String[] alternatives = normalized.split("\\s+or\\s+(?:\\d+\\s+)?(?:other\\s+)?");
+        if (alternatives.length > 1) {
+            return Arrays.stream(alternatives).anyMatch(alternative -> matchesGeneralCostRequirement(
+                    cardName, cardType, cardArchetype, cardRace, alternative));
+        }
+        String type = safeLower(cardType);
         if (normalized.contains("monster") && !type.contains("monster")) {
             return false;
         }
@@ -1253,14 +1316,19 @@ public class ComboService {
         if (normalized.contains("trap") && !type.contains("trap")) {
             return false;
         }
+        for (String race : MONSTER_RACES) {
+            if (normalized.contains(race + " monster") && !safeLower(cardRace).equals(race)) {
+                return false;
+            }
+        }
 
         List<String> quotedTerms = extractQuotedTerms(requirement);
         if (quotedTerms.isEmpty()) {
             return true;
         }
         String quoted = safeLower(quotedTerms.get(0));
-        return safeLower(card.getName()).contains(quoted)
-                || safeLower(card.getArchetype()).contains(quoted);
+        return safeLower(cardName).contains(quoted)
+                || safeLower(cardArchetype).contains(quoted);
     }
 
     private String generalCostSourceZone(String cost) {
@@ -1467,6 +1535,12 @@ public class ComboService {
                 continue;
             }
             Card matchedCard = findBestCardMatch(quoted);
+            if (isNamedTokenSummon(description, quoted)
+                    && (matchedCard == null || !matchedCard.getName().equalsIgnoreCase(quoted))) {
+                matchedCard = tokenCard(
+                        printedQuotedName(card.getDescription(), quoted),
+                        card.getDescription());
+            }
             if (matchedCard == null || Objects.equals(matchedCard.getId(), card.getId())) {
                 continue;
             }
@@ -2120,6 +2194,60 @@ public class ComboService {
         }
 
         return cards.get(0);
+    }
+
+    private boolean isNamedTokenSummon(String effectText, String quotedName) {
+        return safeLower(quotedName).matches(".* tokens?")
+                && Pattern.compile(
+                        "special summon\\s+(?:up to\\s+)?(?:\\d+|one|an?|any number of)\\s+\""
+                                + Pattern.quote(quotedName) + "\"",
+                        Pattern.CASE_INSENSITIVE)
+                        .matcher(effectText)
+                        .find();
+    }
+
+    private String printedQuotedName(String printedText, String normalizedName) {
+        Matcher matcher = Pattern.compile(
+                "\"(" + Pattern.quote(normalizedName) + ")\"",
+                Pattern.CASE_INSENSITIVE)
+                .matcher(printedText);
+        return matcher.find() ? matcher.group(1) : normalizedName;
+    }
+
+    private Card tokenCard(String name, String effectText) {
+        Card token = new Card(name, "Token Special Summoned by this effect.", "Token Monster", 0);
+        Matcher details = Pattern.compile(
+                "\"" + Pattern.quote(name) + "\"\\s*(?:\\(([^)]*)\\)|\\[([^]]*)])",
+                Pattern.CASE_INSENSITIVE)
+                .matcher(effectText);
+        if (!details.find()) {
+            return token;
+        }
+
+        String printedDetails = details.group(1) != null ? details.group(1) : details.group(2);
+        String[] parts = printedDetails.split("/");
+        for (String rawPart : parts) {
+            String part = rawPart.trim();
+            Matcher level = Pattern.compile("level\\s+(\\d+)", Pattern.CASE_INSENSITIVE).matcher(part);
+            Matcher atk = Pattern.compile("atk\\s+(\\d+)", Pattern.CASE_INSENSITIVE).matcher(part);
+            Matcher def = Pattern.compile("def\\s+(\\d+)", Pattern.CASE_INSENSITIVE).matcher(part);
+            if (level.matches()) {
+                token.setLevel(Integer.parseInt(level.group(1)));
+            } else if (atk.matches()) {
+                token.setAtk(Integer.parseInt(atk.group(1)));
+            } else if (def.matches()) {
+                token.setDef(Integer.parseInt(def.group(1)));
+            } else if (part.equalsIgnoreCase("Tuner")) {
+                token.setType("Tuner Token Monster");
+            } else if (MONSTER_RACES.stream().anyMatch(race ->
+                    race.equalsIgnoreCase(part.replaceFirst("(?i)-type$", "")))) {
+                token.setRace(part.replaceFirst("(?i)-type$", ""));
+            } else if (List.of("DARK", "DIVINE", "EARTH", "FIRE", "LIGHT", "WATER", "WIND")
+                    .stream().anyMatch(attribute -> attribute.equalsIgnoreCase(part))) {
+                token.setAttribute(part);
+            }
+        }
+        return token;
     }
 
     private ComboDraft draftFor(Map<String, ComboDraft> drafts, Card card) {
