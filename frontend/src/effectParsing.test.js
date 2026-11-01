@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { splitCardEffects } from './effectParsing.js'
+import { isPassiveEffectText, splitCardEffects } from './effectParsing.js'
 import { effectSourceZone } from './effectSourceZone.js'
 
 const card = {
@@ -26,4 +26,13 @@ test('the reveal effect belongs to the hand and the discard Quick Effect belongs
 
   assert.equal(effectSourceZone(parsedHandEffect, card), 'Hand')
   assert.equal(effectSourceZone(parsedFieldEffect, card), 'Monster Zone')
+})
+
+test('continuous restrictions are passive while colon-delimited activations remain active', () => {
+  assert.equal(isPassiveEffectText(
+      'While that Token is in the Monster Zone, the player who Summoned it cannot Special Summon monsters from the Extra Deck, except Synchro Monsters.',
+  ), true)
+  assert.equal(isPassiveEffectText(
+      'While this card is in your GY: You can banish this card; Special Summon 1 monster.',
+  ), false)
 })
