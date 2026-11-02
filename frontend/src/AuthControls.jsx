@@ -64,7 +64,10 @@ function AuthDialog({ mode, onClose, onModeChange }) {
         return
       }
 
-      if (isCreateAccount && result.data?.user && !result.data.user.emailVerified) {
+      // This Neon branch requires an email OTP. The signup response can vary
+      // depending on whether Neon creates a session before verification, so a
+      // successful signup should always continue to the code-entry screen.
+      if (isCreateAccount) {
         setStep('verify')
         return
       }
@@ -105,7 +108,14 @@ function AuthDialog({ mode, onClose, onModeChange }) {
     }
   }
 
-  function returnToSignUp() {
+  function openVerification() {
+    setStep('verify')
+    setVerificationCode('')
+    setError('')
+    setShowPassword(false)
+  }
+
+  function returnToAuth() {
     setStep('auth')
     setVerificationCode('')
     setError('')
@@ -133,7 +143,7 @@ function AuthDialog({ mode, onClose, onModeChange }) {
         </h2>
         <p className="auth-intro">
           {isVerifying
-            ? <>We sent a verification code to <strong>{form.email}</strong>. Enter it below to finish creating your account.</>
+            ? 'Enter the email used to create your account and the six-digit verification code we sent you.'
             : isCreateAccount
             ? 'Create a profile to make this card search your own.'
             : 'Sign in to continue your Yu-Gi-Oh! card search.'}
@@ -141,23 +151,37 @@ function AuthDialog({ mode, onClose, onModeChange }) {
 
         <form className="auth-form" onSubmit={isVerifying ? handleVerifyEmail : handleSubmit}>
           {isVerifying ? (
-            <label>
-              Verification code
-              <input
-                ref={firstFieldRef}
-                name="verificationCode"
-                type="text"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                value={verificationCode}
-                onChange={event => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
-                minLength="6"
-                maxLength="6"
-                pattern="[0-9]{6}"
-                placeholder="Enter 6-digit code"
-                required
-              />
-            </label>
+            <>
+              <label>
+                Email
+                <input
+                  ref={form.email ? null : firstFieldRef}
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  value={form.email}
+                  onChange={updateField}
+                  required
+                />
+              </label>
+              <label>
+                Verification code
+                <input
+                  ref={form.email ? firstFieldRef : null}
+                  name="verificationCode"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  value={verificationCode}
+                  onChange={event => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                  minLength="6"
+                  maxLength="6"
+                  pattern="[0-9]{6}"
+                  placeholder="Enter 6-digit code"
+                  required
+                />
+              </label>
+            </>
           ) : (
             <>
               {isCreateAccount && (
@@ -237,7 +261,7 @@ function AuthDialog({ mode, onClose, onModeChange }) {
           <button
             type="button"
             onClick={() => {
-              if (isVerifying) returnToSignUp()
+              if (isVerifying) returnToAuth()
               else switchAuthMode()
             }}
             disabled={submitting}
@@ -245,6 +269,14 @@ function AuthDialog({ mode, onClose, onModeChange }) {
             {isVerifying ? 'Go back' : isCreateAccount ? 'Sign in' : 'Create one'}
           </button>
         </p>
+        {!isVerifying && (
+          <p className="auth-switch auth-verification-link">
+            Already have a verification code?{' '}
+            <button type="button" onClick={openVerification} disabled={submitting}>
+              Enter it
+            </button>
+          </p>
+        )}
       </section>
     </div>
   )
