@@ -1,13 +1,14 @@
 import { createAuthClient } from '@neon/auth';
 import { BetterAuthReactAdapter } from '@neon/auth/react/adapters';
 
+// @ts-ignore
 const authBaseUrl = import.meta.env.VITE_NEON_AUTH_URL;
 
 if (!authBaseUrl) {
     throw new Error('VITE_NEON_AUTH_URL is required to initialize Neon Auth.');
 }
 
-// @ts-ignore
+
 export const neon = {
     auth: createAuthClient(authBaseUrl, {
         adapter: BetterAuthReactAdapter({
