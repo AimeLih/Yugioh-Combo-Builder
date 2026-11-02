@@ -11,7 +11,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@neondatabase/neon-js": "^0.9.0-beta",
+    "@better-auth/core": "1.7.12",
+    "@better-auth/oauth-provider": "1.7.12",
+    "@neon/auth": "0.8.2",
+    "better-auth": "1.7.12",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.5"
