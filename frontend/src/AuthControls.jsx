@@ -296,13 +296,13 @@ export default function AuthControls() {
     }
   }
 
-  if (session.isPending) {
-    return <div className="auth-controls auth-controls-loading" aria-label="Loading account" />
-  }
+  let controls
 
-  if (session.data?.user) {
+  if (session.isPending) {
+    controls = <div className="auth-controls auth-controls-loading" aria-label="Loading account" />
+  } else if (session.data?.user) {
     const displayName = session.data.user.name || session.data.user.email
-    return (
+    controls = (
       <div className="auth-controls signed-in-controls">
         <span className="auth-user" title={session.data.user.email}>{displayName}</span>
         <button className="auth-button auth-button-secondary" type="button" onClick={handleSignOut} disabled={signingOut}>
@@ -310,10 +310,8 @@ export default function AuthControls() {
         </button>
       </div>
     )
-  }
-
-  return (
-    <>
+  } else {
+    controls = (
       <div className="auth-controls">
         <button className="auth-button auth-button-secondary" type="button" onClick={() => setDialogMode('sign-in')}>
           Sign in
@@ -322,6 +320,12 @@ export default function AuthControls() {
           Create account
         </button>
       </div>
+    )
+  }
+
+  return (
+    <>
+      {controls}
       {dialogMode && (
         <AuthDialog
           mode={dialogMode}
