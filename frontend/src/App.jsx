@@ -9,6 +9,7 @@ import {
   spellTrapResolutionZone,
 } from './effectResolution.js'
 import { isPassiveEffectText, splitCardEffects } from './effectParsing.js'
+import AuthControls from './AuthControls.jsx'
 
 function typeColor(type) {
   if (!type) return '#1a3a5c'
@@ -2737,6 +2738,7 @@ export default function App() {
           <div className="header-title">
             <span className="title-accent">Yu-Gi-Oh!</span> Card Search
           </div>
+          <AuthControls />
         </header>
 
         <main className="app-main">
