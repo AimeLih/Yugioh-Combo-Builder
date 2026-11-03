@@ -47,7 +47,7 @@ jobs:
               ;;
           esac
 
-          curl \
+          response="$(curl \
             --fail-with-body \
             --show-error \
             --silent \
@@ -57,4 +57,22 @@ jobs:
             --max-time 600 \
             --request POST \
             --header "X-Import-Token: $IMPORT_TOKEN" \
-            "${IMPORT_URL%/}/yugioh/admin/import"
+            "${IMPORT_URL%/}/yugioh/admin/import")"
+
+          echo "$response" | jq .
+
+          cards_added="$(echo "$response" | jq -r '.cardsAdded')"
+          {
+            echo "## Weekly card import"
+            echo
+            echo "Imported **${cards_added}** new card(s)."
+            echo
+
+            if [ "$cards_added" -eq 0 ]; then
+              echo "No new cards were found."
+            else
+              echo "### Imported cards"
+              echo
+              echo "$response" | jq -r '.cardNames[] | "- " + .'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
