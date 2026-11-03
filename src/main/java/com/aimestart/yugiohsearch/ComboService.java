@@ -235,7 +235,8 @@ public class ComboService {
                 "send to the gy",
                 "send to the graveyard",
                 "discard",
-                "banish")) {
+                "banish",
+                "attach")) {
             return false;
         }
 
@@ -269,7 +270,7 @@ public class ComboService {
                 "place this card",
                 "banish this card")
                 && !Pattern.compile(
-                        "(?:add|summon|set|place|send|discard|banish|target)\\s+(?:up to\\s+)?(?:\\d+|one|a)\\s+",
+                        "(?:add|summon|set|place|send|discard|banish|target|attach)\\s+(?:up to\\s+)?(?:\\d+|one|a)\\s+",
                         Pattern.CASE_INSENSITIVE)
                         .matcher(effectText)
                         .find()) {
@@ -277,7 +278,7 @@ public class ComboService {
         }
 
         return Pattern.compile(
-                "(?:add|summon|set|place|send|discard|banish|target)\\s+(?:up to\\s+)?(?:\\d+|one|a)\\s+",
+                "(?:add|summon|set|place|send|discard|banish|target|attach)\\s+(?:up to\\s+)?(?:\\d+|one|a)\\s+",
                 Pattern.CASE_INSENSITIVE)
                 .matcher(effectText)
                 .find();
@@ -1816,6 +1817,14 @@ public class ComboService {
         String token = "\"" + safeLower(quoted) + "\"";
         int quoteIndex = text.indexOf(token);
         while (quoteIndex >= 0) {
+            int sentenceEnd = text.indexOf('.', quoteIndex);
+            String clauseRemainder = text.substring(
+                    quoteIndex + token.length(),
+                    sentenceEnd >= 0 ? sentenceEnd : text.length());
+            if (clauseRemainder.contains("attach")
+                    && containsAny(clauseRemainder, "xyz material", "as material")) {
+                return "Xyz Material";
+            }
             int boundary = Math.max(
                     Math.max(text.lastIndexOf('.', quoteIndex), text.lastIndexOf(';', quoteIndex)),
                     text.lastIndexOf(':', quoteIndex));
@@ -1825,7 +1834,8 @@ public class ComboService {
             int set = clausePrefix.lastIndexOf("set ");
             int place = clausePrefix.lastIndexOf("place ");
             int send = Math.max(clausePrefix.lastIndexOf("send "), clausePrefix.lastIndexOf("banish "));
-            int latestAction = Stream.of(summon, add, set, place, send).max(Integer::compareTo).orElse(-1);
+            int attach = clausePrefix.lastIndexOf("attach ");
+            int latestAction = Stream.of(summon, add, set, place, send, attach).max(Integer::compareTo).orElse(-1);
 
             if (latestAction >= 0) {
                 if (latestAction == summon) return "Monster Zone";
@@ -1833,6 +1843,7 @@ public class ComboService {
                 if (latestAction == set) {
                     return isSpellOrTrap(target) ? "Spell & Trap Zone" : "Monster Zone (Set)";
                 }
+                if (latestAction == attach) return "Xyz Material";
                 if (latestAction == place) return destinationForEffect(effectText, target);
                 return text.contains("banish") ? "Banished" : "Graveyard";
             }
@@ -2108,6 +2119,10 @@ public class ComboService {
 
     private String destinationForEffect(String effectText, Card target) {
         String text = safeLower(effectText);
+        if ((text.contains("attach") || text.contains("as material"))
+                && containsAny(text, "xyz material", "as material", "as an xyz material")) {
+            return "Xyz Material";
+        }
         if (containsAny(text, "spell & trap zone", "spell/trap zone") && text.contains("continuous trap")) {
             return "Spell & Trap Zone as Continuous Trap";
         }
