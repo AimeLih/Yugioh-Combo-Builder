@@ -184,7 +184,6 @@ All endpoints use the `/yugioh` prefix.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `POST` | `/admin/import` | Import cards not already in the database |
 | `GET` | `/card?name=...` | Load one complete card by exact name |
 | `GET` | `/card/substring?name=...&limit=...` | Return lightweight partial-name search summaries |
 | `GET` | `/card/substring?name=...&typeId=...&raceId=...&attributeId=...&archetypeId=...` | Search with optional numeric filters |
