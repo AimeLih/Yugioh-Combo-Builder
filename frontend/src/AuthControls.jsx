@@ -2,6 +2,21 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { neon } from './lib/neon'
 
 const EMPTY_FORM = { name: '', email: '', password: '' }
+const API = import.meta.env.VITE_API_URL || 'http://localhost:8080'
+
+function isDuplicateEmailError(error) {
+  const code = `${error?.code || error?.body?.code || ''}`.toUpperCase()
+  const message = authErrorMessage(error)
+  return code.includes('USER_ALREADY_EXISTS')
+    || /user already exists|email (?:is )?already (?:in use|taken|registered)/i.test(message)
+}
+
+function isEmailVerificationRequiredError(error) {
+  const code = `${error?.code || error?.body?.code || ''}`.toUpperCase()
+  const message = authErrorMessage(error)
+  return code.includes('EMAIL_NOT_VERIFIED')
+    || /email (?:is )?not verified|verify your email/i.test(message)
+}
 
 function authErrorMessage(error) {
   if (!error) return 'Something went wrong. Please try again.'
@@ -24,30 +39,53 @@ function PasswordVisibilityIcon({ visible }) {
 function AuthDialog({ mode, onClose, onModeChange }) {
   const [form, setForm] = useState(EMPTY_FORM)
   const [step, setStep] = useState('auth')
+  const [verificationEmail, setVerificationEmail] = useState('')
   const [verificationCode, setVerificationCode] = useState('')
   const [error, setError] = useState('')
+  const [emailError, setEmailError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [resending, setResending] = useState(false)
+  const [resendMessage, setResendMessage] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const titleId = useId()
   const firstFieldRef = useRef(null)
   const isCreateAccount = mode === 'sign-up'
   const isVerifying = step === 'verify'
+  const verificationComplete = step === 'complete'
+  const busy = submitting || resending
 
   useEffect(() => {
     firstFieldRef.current?.focus()
     const handleKeyDown = event => {
-      if (event.key === 'Escape' && !submitting) onClose()
+      if (event.key === 'Escape' && !busy) onClose()
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [onClose, step, submitting])
+  }, [busy, onClose, step])
 
   async function handleSubmit(event) {
     event.preventDefault()
     setError('')
+    setEmailError('')
     setSubmitting(true)
 
     try {
+      if (isCreateAccount) {
+        const availabilityResponse = await fetch(
+          `${API}/yugioh/auth/email-availability?email=${encodeURIComponent(form.email.trim())}`,
+        )
+
+        if (!availabilityResponse.ok) {
+          throw new Error('We could not check that email address. Please try again.')
+        }
+
+        const availability = await availabilityResponse.json()
+        if (!availability.available) {
+          setEmailError('That email is already taken.')
+          return
+        }
+      }
+
       const result = isCreateAccount
         ? await neon.auth.signUp.email({
             name: form.name.trim(),
@@ -60,21 +98,32 @@ function AuthDialog({ mode, onClose, onModeChange }) {
           })
 
       if (result.error) {
-        setError(authErrorMessage(result.error))
+        if (isCreateAccount && isDuplicateEmailError(result.error)) {
+          setEmailError('That email is already taken.')
+        } else if (!isCreateAccount && isEmailVerificationRequiredError(result.error)) {
+          setVerificationEmail(form.email.trim())
+          setVerificationCode('')
+          setStep('verify')
+        } else {
+          setError(authErrorMessage(result.error))
+        }
         return
       }
 
-      // This Neon branch requires an email OTP. The signup response can vary
-      // depending on whether Neon creates a session before verification, so a
-      // successful signup should always continue to the code-entry screen.
       if (isCreateAccount) {
+        setVerificationEmail(form.email.trim())
+        setVerificationCode('')
         setStep('verify')
         return
       }
 
       onClose()
     } catch (authError) {
-      setError(authErrorMessage(authError))
+      if (isCreateAccount && isDuplicateEmailError(authError)) {
+        setEmailError('That email is already taken.')
+      } else {
+        setError(authErrorMessage(authError))
+      }
     } finally {
       setSubmitting(false)
     }
@@ -82,17 +131,19 @@ function AuthDialog({ mode, onClose, onModeChange }) {
 
   function updateField(event) {
     setForm(current => ({ ...current, [event.target.name]: event.target.value }))
+    if (event.target.name === 'email') setEmailError('')
   }
 
   async function handleVerifyEmail(event) {
     event.preventDefault()
     setError('')
+    setResendMessage('')
     setSubmitting(true)
 
     try {
       const result = await neon.auth.emailOtp.verifyEmail({
-        email: form.email.trim(),
-        otp: verificationCode.trim(),
+        email: verificationEmail,
+        otp: verificationCode,
       })
 
       if (result.error) {
@@ -100,7 +151,7 @@ function AuthDialog({ mode, onClose, onModeChange }) {
         return
       }
 
-      onClose()
+      setStep('complete')
     } catch (authError) {
       setError(authErrorMessage(authError))
     } finally {
@@ -108,18 +159,30 @@ function AuthDialog({ mode, onClose, onModeChange }) {
     }
   }
 
-  function openVerification() {
-    setStep('verify')
-    setVerificationCode('')
+  async function handleResendVerification() {
     setError('')
-    setShowPassword(false)
-  }
+    setResendMessage('')
+    setResending(true)
 
-  function returnToAuth() {
-    setStep('auth')
-    setVerificationCode('')
-    setError('')
-    setShowPassword(false)
+    try {
+      const result = await neon.auth.sendVerificationEmail({
+        email: verificationEmail,
+        callbackURL: `${window.location.origin}/`,
+      })
+
+      if (result.error) {
+        setError(authErrorMessage(result.error))
+        return
+      }
+
+      setVerificationCode('')
+      setResendMessage('A new verification code was sent.')
+      firstFieldRef.current?.focus()
+    } catch (authError) {
+      setError(authErrorMessage(authError))
+    } finally {
+      setResending(false)
+    }
   }
 
   function switchAuthMode() {
@@ -130,60 +193,76 @@ function AuthDialog({ mode, onClose, onModeChange }) {
 
   return (
     <div className="auth-backdrop" onMouseDown={event => {
-      if (event.target === event.currentTarget && !submitting) onClose()
+      if (event.target === event.currentTarget && !busy) onClose()
     }}>
       <section className="auth-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-        <button className="auth-close" type="button" aria-label="Close" onClick={onClose} disabled={submitting}>
+        {isVerifying && (
+          <button
+            className="auth-resend"
+            type="button"
+            onClick={handleResendVerification}
+            disabled={busy}
+          >
+            {resending ? 'Sending…' : 'Resend code'}
+          </button>
+        )}
+        <button className="auth-close" type="button" aria-label="Close" onClick={onClose} disabled={busy}>
           ×
         </button>
         <div className="auth-mark" aria-hidden="true">✦</div>
 
         <h2 id={titleId}>
-          {isVerifying ? 'Verify your email' : isCreateAccount ? 'Create your account' : 'Welcome back'}
+          {verificationComplete
+            ? 'Verification complete'
+            : isVerifying
+              ? 'Verify your email'
+              : isCreateAccount
+                ? 'Create your account'
+                : 'Welcome back'}
         </h2>
         <p className="auth-intro">
-          {isVerifying
-            ? 'Enter the email used to create your account and the six-digit verification code we sent you.'
+          {verificationComplete
+            ? 'Your email has been verified. Enjoy the site!'
+            : isVerifying
+              ? <>Enter the six-digit verification code sent to <strong>{verificationEmail}</strong>.</>
             : isCreateAccount
-            ? 'Create a profile to make this card search your own.'
-            : 'Sign in to continue your Yu-Gi-Oh! card search.'}
+              ? 'Create a profile to make this card search your own.'
+              : 'Sign in to continue your Yu-Gi-Oh! card search.'}
         </p>
 
-        <form className="auth-form" onSubmit={isVerifying ? handleVerifyEmail : handleSubmit}>
-          {isVerifying ? (
-            <>
-              <label>
-                Email
-                <input
-                  ref={form.email ? null : firstFieldRef}
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  value={form.email}
-                  onChange={updateField}
-                  required
-                />
-              </label>
-              <label>
-                Verification code
-                <input
-                  ref={form.email ? firstFieldRef : null}
-                  name="verificationCode"
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  value={verificationCode}
-                  onChange={event => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
-                  minLength="6"
-                  maxLength="6"
-                  pattern="[0-9]{6}"
-                  placeholder="Enter 6-digit code"
-                  required
-                />
-              </label>
-            </>
-          ) : (
-            <>
+        {isVerifying && (
+          <form className="auth-form" onSubmit={handleVerifyEmail}>
+            <label>
+              Verification code
+              <input
+                ref={firstFieldRef}
+                className="auth-code-input"
+                name="verificationCode"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                value={verificationCode}
+                onChange={event => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                minLength="6"
+                maxLength="6"
+                pattern="[0-9]{6}"
+                placeholder="000000"
+                required
+              />
+            </label>
+
+            {resendMessage && <p className="auth-resend-status" role="status">{resendMessage}</p>}
+            {error && <p className="auth-error" role="alert">{error}</p>}
+
+            <button className="auth-submit" type="submit" disabled={busy}>
+              {submitting ? 'Verifying…' : 'Verify email'}
+            </button>
+          </form>
+        )}
+
+        {step === 'auth' && (
+          <>
+            <form className="auth-form" onSubmit={handleSubmit}>
               {isCreateAccount && (
                 <label>
                   Display name
@@ -209,8 +288,11 @@ function AuthDialog({ mode, onClose, onModeChange }) {
                   autoComplete="email"
                   value={form.email}
                   onChange={updateField}
+                  aria-invalid={Boolean(emailError)}
+                  aria-describedby={emailError ? 'auth-email-error' : undefined}
                   required
                 />
+                {emailError && <span id="auth-email-error" className="auth-field-error" role="alert">{emailError}</span>}
               </label>
               <label>
                 Password
@@ -236,46 +318,21 @@ function AuthDialog({ mode, onClose, onModeChange }) {
                   </button>
                 </span>
               </label>
-            </>
-          )}
 
-          {error && <p className="auth-error" role="alert">{error}</p>}
+              {error && <p className="auth-error" role="alert">{error}</p>}
 
-          <button className="auth-submit" type="submit" disabled={submitting}>
-            {submitting
-              ? 'Please wait…'
-              : isVerifying
-                ? 'Verify email'
-                : isCreateAccount
-                  ? 'Create account'
-                  : 'Sign in'}
-          </button>
-        </form>
+              <button className="auth-submit" type="submit" disabled={submitting}>
+                {submitting ? 'Please wait…' : isCreateAccount ? 'Create account' : 'Sign in'}
+              </button>
+            </form>
 
-        <p className="auth-switch">
-          {isVerifying
-            ? 'Need to use a different email?'
-            : isCreateAccount
-              ? 'Already have an account?'
-              : 'New to the card search?'}{' '}
-          <button
-            type="button"
-            onClick={() => {
-              if (isVerifying) returnToAuth()
-              else switchAuthMode()
-            }}
-            disabled={submitting}
-          >
-            {isVerifying ? 'Go back' : isCreateAccount ? 'Sign in' : 'Create one'}
-          </button>
-        </p>
-        {!isVerifying && (
-          <p className="auth-switch auth-verification-link">
-            Already have a verification code?{' '}
-            <button type="button" onClick={openVerification} disabled={submitting}>
-              Enter it
-            </button>
-          </p>
+            <p className="auth-switch">
+              {isCreateAccount ? 'Already have an account?' : 'New to the card search?'}{' '}
+              <button type="button" onClick={switchAuthMode} disabled={submitting}>
+                {isCreateAccount ? 'Sign in' : 'Create one'}
+              </button>
+            </p>
+          </>
         )}
       </section>
     </div>
