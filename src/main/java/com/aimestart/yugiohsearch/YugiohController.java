@@ -96,7 +96,7 @@ public class YugiohController {
         return cardCatalogService.getArchetypeSuggestions(query, limit);
     }
 
-    public record ImportResult(int cardsAdded) {}
+    public record ImportResult(int cardsAdded, List<String> cardNames) {}
 
     @PostMapping("/admin/import")
     public ImportResult importNewCards(
@@ -104,7 +104,8 @@ public class YugiohController {
             String providedToken
     ) {
         requireImportToken(providedToken);
-        return new ImportResult(cardCatalogService.importNewCards());
+        List<String> cardNames = cardCatalogService.importNewCards();
+        return new ImportResult(cardNames.size(), cardNames);
     }
 
     private void requireImportToken(String providedToken) {
