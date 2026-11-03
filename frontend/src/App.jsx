@@ -1829,7 +1829,7 @@ function CardListItem({ card, selected, loading, onClick }) {
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8080'
 const EMPTY_FILTERS = { typeId: '', raceId: '', attributeId: '', archetypeId: '' }
 const AUTOCOMPLETE_LIMIT = 10
-const SEARCH_RESULT_LIMIT = 50
+const SEARCH_RESULT_LIMIT = 1000
 const FILTERED_SEARCH_RESULT_LIMIT = 5000
 const MONSTER_FIELD_ZONES = ['monsterZone', 'extraMonsterZone']
 
