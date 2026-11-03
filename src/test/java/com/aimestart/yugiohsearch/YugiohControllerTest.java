@@ -7,6 +7,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
@@ -34,12 +36,15 @@ class YugiohControllerTest {
 
     @Test
     void importAcceptsConfiguredToken() {
-        when(cardCatalogService.importNewCards()).thenReturn(4);
+        when(cardCatalogService.importNewCards()).thenReturn(List.of(
+                "New Card One",
+                "New Card Two"));
 
         YugiohController.ImportResult result = controller.importNewCards("test-import-token");
 
         verify(cardCatalogService).importNewCards();
-        assertEquals(4, result.cardsAdded());
+        assertEquals(2, result.cardsAdded());
+        assertEquals(List.of("New Card One", "New Card Two"), result.cardNames());
     }
 
     private void assertUnauthorized(Executable request) {
