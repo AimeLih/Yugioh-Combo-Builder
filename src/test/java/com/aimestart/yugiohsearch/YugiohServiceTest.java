@@ -201,6 +201,21 @@ class YugiohServiceTest {
     }
 
     @Test
+    void attachEffectsRouteTheirTargetsToXyzMaterial() {
+        String effect = "Target 1 \"Raidraptor Test Material\" in your GY; attach it to this card as Xyz Material.";
+        Card source = card(1, "Raidraptor Test Xyz", effect, "Xyz Monster", "Raidraptor");
+        Card target = card(2, "Raidraptor Test Material", "A material target.", "Effect Monster", "Raidraptor");
+        stubRelatedCards(source, List.of(target));
+        when(repository.findByNameContainingIgnoreCase(target.getName().toLowerCase())).thenReturn(List.of(target));
+
+        List<ComboService.ComboOption> options = service.getPossibleCombos(source.getName(), null, effect);
+
+        assertTrue(options.stream().anyMatch(option ->
+                option.card().getName().equals(target.getName())
+                        && option.destination().equals("Xyz Material")), options.toString());
+    }
+
+    @Test
     void summonRouteIncludesMonstersWhoseTextMentionsTheNamedCard() {
         String effect = "You can Tribute this card; Special Summon from your hand or Deck, "
                 + "1 \"Ancient Gear Golem\" or 1 monster that mentions it, except \"Ancient Gear Statue\", "
@@ -928,7 +943,7 @@ class YugiohServiceTest {
                 null,
                 List.of(new YugiohService.CardImage("https://example.com/new-link.jpg")));
 
-        int imported = cardCatalogService.importNewCards(
+        List<String> importedCardNames = cardCatalogService.importNewCards(
                 List.of(existingApiCard, newLinkCard),
                 Set.of("New Link Card"));
 
@@ -938,7 +953,7 @@ class YugiohServiceTest {
                         savedCardsCaptor.getValue().spliterator(), false)
                 .toList();
 
-        assertEquals(1, imported);
+        assertEquals(List.of("New Link Card"), importedCardNames);
         assertEquals(1, savedCards.size());
         assertEquals("Original description", existingCard.getDescription());
 
