@@ -53,13 +53,13 @@ public class CardCatalogService {
     }
 
     @Transactional
-    public int importNewCards() {
+    public List<String> importNewCards() {
         return importNewCards(
                 yugiohService.fetchAllCards(),
                 yugiohService.fetchStapleCardNames());
     }
 
-    int importNewCards(List<YugiohService.CardData> apiCards, Set<String> stapleNames) {
+    List<String> importNewCards(List<YugiohService.CardData> apiCards, Set<String> stapleNames) {
         Set<String> existingNames = new HashSet<>(cardRepository.findAllNormalizedNames());
 
         List<Card> newCards = apiCards.stream()
@@ -71,7 +71,10 @@ public class CardCatalogService {
             cardReferenceDataService.resolveReferences(newCards);
             cardRepository.saveAll(newCards);
         }
-        return newCards.size();
+
+        return newCards.stream()
+                .map(Card::getName)
+                .toList();
     }
 
     public Card getCardByName(String name) {
