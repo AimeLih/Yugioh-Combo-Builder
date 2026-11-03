@@ -9,6 +9,18 @@ import {
   spellTrapResolutionZone,
 } from './effectResolution.js'
 import { isPassiveEffectText, splitCardEffects } from './effectParsing.js'
+import {
+  attachXyzMaterials,
+  canUseAsLevelXyzMaterial,
+  detachXyzMaterials,
+  materialCardCategory,
+  prepareXyzMaterials,
+  releaseXyzMaterials,
+  xyzAlternateMaterialDescriptor,
+  xyzAttachmentSourceZones,
+  xyzMaterialDetachRequirement,
+  xyzTransfersExistingMaterials,
+} from './xyzMaterials.js'
 import AuthControls from './AuthControls.jsx'
 
 function typeColor(type) {
@@ -268,6 +280,11 @@ function matchesMaterialDescriptor(entry, descriptor) {
   const requiredLevels = [...rule.matchAll(/\blevel\s+(\d+)\b/g)]
       .map(match => Number(match[1]))
   if (requiredLevels.length > 0 && !requiredLevels.includes(Number(card.level))) return false
+  const rankMatch = rule.match(/\brank\s+(\d+)(?:\s+or\s+(\d+))?/)
+  if (rankMatch) {
+    const requiredRanks = rankMatch.slice(1).filter(Boolean).map(Number)
+    if (extraDeckKind(card) !== 'Xyz' || !requiredRanks.includes(Number(card.level))) return false
+  }
 
   if (rule.includes('non-tuner') && type.includes('tuner')) return false
   if (!rule.includes('non-tuner') && /\btuner\b/.test(rule) && !type.includes('tuner')) return false
@@ -341,11 +358,26 @@ function linkRatingCanTotal(materials, targetRating) {
   return totals.has(targetRating)
 }
 
+function cannotBeUsedAsXyzMaterial(entry) {
+  const text = entry.card.description || ''
+  if (!/cannot be used as (?:an? )?(?:xyz )?material/i.test(text)) return false
+  if (/while it has material/i.test(text)) return (entry.overlayMaterials?.length ?? 0) > 0
+  return true
+}
+
 function findLegalExtraDeckMaterials(target, fieldEntries) {
   const kind = extraDeckKind(target)
   const requirement = materialRequirement(target)
   const clauses = materialClauses(requirement)
-  const candidates = fieldEntries.filter(entry => isMonsterCard(entry.card))
+  const candidates = fieldEntries.filter(entry => isMonsterCard(entry.card)
+    && !(kind === 'Xyz' && cannotBeUsedAsXyzMaterial(entry)))
+  if (kind === 'Xyz') {
+    const alternateDescriptor = xyzAlternateMaterialDescriptor(normalizeEffectText(target.description))
+    if (alternateDescriptor) {
+      const alternate = candidates.find(entry => matchesMaterialDescriptor(entry, alternateDescriptor))
+      if (alternate) return [alternate]
+    }
+  }
   const minimumMaterials = kind === 'Link'
     ? Math.max(1, clauses.reduce((sum, clause) => sum + clause.minimum, 0))
     : 2
@@ -364,7 +396,7 @@ function findLegalExtraDeckMaterials(target, fieldEntries) {
     if (kind === 'Xyz') {
       const requiredLevel = Number(requirement.match(/level\s+(\d+)/i)?.[1] || target.level)
       if (materials.some(entry => isTokenCard(entry.card))) continue
-      if (!requiredLevel || materials.some(entry => Number(entry.card.level) !== requiredLevel)) continue
+      if (!requiredLevel || materials.some(entry => !canUseAsLevelXyzMaterial(entry.card, requiredLevel))) continue
       if (!satisfiesClauses(materials, clauses)) continue
       return materials
     }
@@ -505,6 +537,10 @@ function canActivateFromZone(entry, zone) {
   if (zone === 'graveyard') {
     return effects.some(effectOption => {
       const effect = effectOption.text.toLowerCase()
+      if (entry.moveFrom === 'xyzMaterial'
+          && /\b(?:leaves? the field|sent from (?:the )?field|sent from the monster zone)\b/.test(effect)) {
+        return false
+      }
       if (/destroyed(?: by battle| by card effect)? and sent to (?:the |your )?(?:gy|graveyard)/.test(effect)) {
         return reason === 'destroy'
       }
@@ -523,6 +559,32 @@ function canActivateFromZone(entry, zone) {
   return true
 }
 
+function xyzDetachCandidates(entry, effectText, zones) {
+  const requirement = xyzMaterialDetachRequirement(effectText)
+  if (!requirement) return { requirement: null, candidates: [] }
+  const hosts = requirement.source === 'controlledXyz'
+    ? [...zones.monsterZone, ...zones.extraMonsterZone].filter(host =>
+      extraDeckKind(host.card) === 'Xyz' && host.overlayMaterials?.length > 0)
+    : entry ? [entry] : []
+  const candidates = hosts.flatMap(host => (host.overlayMaterials || []).map(material => ({
+    hostEntryId: host.instanceId,
+    hostName: host.card.name,
+    material,
+  })))
+  return { requirement, candidates }
+}
+
+function xyzMaterialCostReason(entry, effectText, zones) {
+  const { requirement, candidates } = xyzDetachCandidates(entry, effectText, zones)
+  if (!requirement) return ''
+  const available = requirement.differentTypes
+    ? new Set(candidates.map(candidate => materialCardCategory(candidate.material))).size
+    : candidates.length
+  return available < requirement.min
+    ? `Requires at least ${requirement.min} eligible Xyz material${requirement.min === 1 ? '' : 's'}, but only ${available} remain.`
+    : ''
+}
+
 function SimulatedZones({
   zones,
   activatedEffects,
@@ -533,6 +595,8 @@ function SimulatedZones({
   onOpenPendulumSummon,
   onMoveCard,
   onRemoveCard,
+  onShowXyzMaterials,
+  selectedEntryId,
 }) {
   const zoneDefinitions = [
     { key: 'monsterZone', label: 'Monsters' },
@@ -604,6 +668,17 @@ function SimulatedZones({
                           )}
                         </button>
                         <div className="sim-zone-card-actions">
+                          {['monsterZone', 'extraMonsterZone'].includes(zone.key)
+                              && entry.overlayMaterials?.length > 0
+                              && selectedEntryId === entry.instanceId && (
+                              <button
+                                  type="button"
+                                  className="show-xyz-materials"
+                                  onClick={() => onShowXyzMaterials(entry)}
+                              >
+                                Show Materials
+                              </button>
+                          )}
                           {liveEffect && (
                               <button
                                   type="button"
@@ -622,6 +697,15 @@ function SimulatedZones({
                               && !isTokenCard(entry.card)
                               && manualPlacementZones(entry.card).includes('hand') && (
                               <button type="button" onClick={() => onMoveCard(entry, zone.key, 'hand')}>To Hand</button>
+                          )}
+                          {['monsterZone', 'extraMonsterZone'].includes(zone.key) && !isTokenCard(entry.card) && (
+                              <>
+                                <button type="button" onClick={() => onMoveCard(entry, zone.key, 'graveyard')}>To GY</button>
+                                <button type="button" onClick={() => onMoveCard(entry, zone.key, 'banished')}>Banish</button>
+                                {manualPlacementZones(entry.card).includes('extraDeck') && (
+                                    <button type="button" onClick={() => onMoveCard(entry, zone.key, 'extraDeck')}>To Extra Deck</button>
+                                )}
+                              </>
                           )}
                           {zone.key === 'hand' && manualPlacementZones(entry.card).includes('monsterZone') && (
                               <button type="button" onClick={() => onMoveCard(entry, zone.key, 'monsterZone')}>Summon</button>
@@ -646,6 +730,112 @@ function SimulatedZones({
               </div>
             </section>
         ))}
+      </div>
+  )
+}
+
+function XyzMaterialsPopup({ entry, onClose, onPreviewCard, onStopPreview }) {
+  if (!entry) return null
+
+  return (
+      <section className="xyz-materials-popup" aria-label={`Materials attached to ${entry.card.name}`}>
+        <div className="xyz-materials-header">
+          <div>
+            <span>Attached Xyz Materials</span>
+            <strong>{entry.card.name}</strong>
+          </div>
+          <button type="button" onClick={onClose}>Close</button>
+        </div>
+        <div className="xyz-materials-list" onMouseLeave={onStopPreview}>
+          {entry.overlayMaterials.map(material => (
+              <button
+                  key={material.instanceId}
+                  type="button"
+                  className="xyz-material-card"
+                  onMouseEnter={() => onPreviewCard(material.card)}
+                  onFocus={() => onPreviewCard(material.card)}
+                  onBlur={onStopPreview}
+              >
+                {material.card.cardImageUrl && <img src={material.card.cardImageUrl} alt="" />}
+                <span>
+                  <strong>{material.card.name}</strong>
+                  <small>{material.card.type}</small>
+                </span>
+              </button>
+          ))}
+        </div>
+        <p>Hover or focus a material to inspect its card information on the left.</p>
+      </section>
+  )
+}
+
+function XyzDetachPicker({ request, onConfirm, onCancel }) {
+  const [selectedIds, setSelectedIds] = useState([])
+  useEffect(() => {
+    setSelectedIds([])
+  }, [request?.entry.instanceId, request?.effect.text])
+  if (!request) return null
+
+  const { requirement, candidates } = request
+  const maximum = requirement.all ? candidates.length : Math.min(requirement.max, candidates.length)
+  const complete = requirement.all
+    ? selectedIds.length === candidates.length
+    : selectedIds.length >= requirement.min && selectedIds.length <= maximum
+  function toggle(candidate) {
+    const instanceId = candidate.material.instanceId
+    setSelectedIds(current => current.includes(instanceId)
+      ? current.filter(id => id !== instanceId)
+      : current.length < maximum
+          && (!requirement.differentTypes || !candidates.some(other =>
+            current.includes(other.material.instanceId)
+              && materialCardCategory(other.material) === materialCardCategory(candidate.material)))
+        ? [...current, instanceId]
+        : current)
+  }
+
+  const amountLabel = requirement.all
+    ? 'all materials'
+    : requirement.min === maximum
+      ? `${requirement.min} material${requirement.min === 1 ? '' : 's'}`
+      : `${requirement.min}–${maximum} materials`
+
+  return (
+      <div className="material-picker-backdrop" role="presentation">
+        <section className="xyz-detach-picker" role="dialog" aria-modal="true" aria-labelledby="xyz-detach-title">
+          <div className="material-picker-header">
+            <div>
+              <div className="material-picker-kicker">Xyz Effect Cost</div>
+              <h3 id="xyz-detach-title">Detach {amountLabel}</h3>
+            </div>
+            <button type="button" className="material-picker-close" onClick={onCancel}>Close</button>
+          </div>
+          <p className="xyz-detach-copy">
+            Choose {amountLabel} to send to the Graveyard.
+            {requirement.differentTypes ? ' Each selected material must have a different card type.' : ''}
+          </p>
+          <div className="xyz-detach-options">
+            {candidates.map(candidate => {
+              const material = candidate.material
+              const checked = selectedIds.includes(material.instanceId)
+              return (
+                  <label key={material.instanceId} className={`xyz-detach-option${checked ? ' selected' : ''}`}>
+                    <input type="checkbox" checked={checked} onChange={() => toggle(candidate)} />
+                    {material.card.cardImageUrl && <img src={material.card.cardImageUrl} alt="" />}
+                    <span>
+                      <strong>{material.card.name}</strong>
+                      <small>{material.card.type} · Attached to {candidate.hostName}</small>
+                    </span>
+                  </label>
+              )
+            })}
+          </div>
+          <div className="xyz-detach-footer">
+            <span>{selectedIds.length} selected · {amountLabel} required</span>
+            <button type="button" disabled={!complete} onClick={() => onConfirm(selectedIds)}>
+              Detach and Activate
+            </button>
+          </div>
+        </section>
       </div>
   )
 }
@@ -1268,12 +1458,20 @@ function CardDetail({
   onClearZones,
   placementPending,
   onPlaceSearchResult,
+  materialPreview,
+  xyzMaterialsEntry,
+  onShowXyzMaterials,
+  onCloseXyzMaterials,
+  onPreviewXyzMaterial,
+  onStopPreviewXyzMaterial,
+  selectedEntryId,
 }) {
   const [summonTargetPickerOpen, setSummonTargetPickerOpen] = useState(false)
   const color = typeColor(card.type)
   const t = (card.type || '').toLowerCase()
   const isMonster = t.includes('monster')
   const isLink = t.includes('link')
+  const isXyz = t.includes('xyz')
   const isPendulum = t.includes('pendulum')
   const hasImage = Boolean(card.cardImageUrl)
   const placementOptions = manualPlacementZones(card)
@@ -1389,7 +1587,7 @@ function CardDetail({
                     {card.attribute && <WikiRow label="Attribute">{card.attribute}</WikiRow>}
                     {card.race && <WikiRow label="Race">{card.race}</WikiRow>}
                     {!isLink && card.level != null && (
-                        <WikiRow label="Level"><Stars count={card.level} /></WikiRow>
+                        <WikiRow label={isXyz ? 'Rank' : 'Level'}><Stars count={card.level} /></WikiRow>
                     )}
                     {isPendulum && card.scale != null && (
                         <WikiRow label="Pendulum Scale">{card.scale}</WikiRow>
@@ -1430,9 +1628,13 @@ function CardDetail({
             <div className="wiki-card-text">{card.description}</div>
 
             <div className="wiki-section-header" style={{ background: color }}>
-              Build Combo
+              {materialPreview ? 'Attached Material Preview' : 'Build Combo'}
             </div>
-            <div className="wiki-combo-panel">
+            {materialPreview ? (
+                <div className="xyz-material-preview-note">
+                  This card is attached as Xyz Material. Move the pointer away to return to the Xyz Monster.
+                </div>
+            ) : <div className="wiki-combo-panel">
               <div className="combo-builder-top">
                 <div className="combo-path" aria-label="Combo path">
                   {comboPath.map((step, index) => (
@@ -1546,7 +1748,7 @@ function CardDetail({
                     This effect resolves without a selectable follow-up card.
                   </div>
               )}
-            </div>
+            </div>}
 
             {summonTargetPickerOpen && (
                 <SummonTargetPicker
@@ -1577,6 +1779,14 @@ function CardDetail({
                 onOpenPendulumSummon={onOpenPendulumSummon}
                 onMoveCard={onMoveCard}
                 onRemoveCard={onRemoveCard}
+                onShowXyzMaterials={onShowXyzMaterials}
+                selectedEntryId={selectedEntryId}
+            />
+            <XyzMaterialsPopup
+                entry={xyzMaterialsEntry}
+                onClose={onCloseXyzMaterials}
+                onPreviewCard={onPreviewXyzMaterial}
+                onStopPreview={onStopPreviewXyzMaterial}
             />
           </aside>
         </div>
@@ -1621,6 +1831,7 @@ const EMPTY_FILTERS = { typeId: '', raceId: '', attributeId: '', archetypeId: ''
 const AUTOCOMPLETE_LIMIT = 10
 const SEARCH_RESULT_LIMIT = 50
 const FILTERED_SEARCH_RESULT_LIMIT = 5000
+const MONSTER_FIELD_ZONES = ['monsterZone', 'extraMonsterZone']
 
 function cardSearchUrl(query, limit, filters) {
   const params = new URLSearchParams({ name: query.trim(), limit: String(limit) })
@@ -1659,6 +1870,9 @@ export default function App() {
   const [selectedEntry, setSelectedEntry] = useState(null)
   const [activeEffect, setActiveEffect] = useState(null)
   const [effectSelection, setEffectSelection] = useState(null)
+  const [xyzDetachRequest, setXyzDetachRequest] = useState(null)
+  const [xyzMaterialsEntryId, setXyzMaterialsEntryId] = useState(null)
+  const [xyzMaterialPreview, setXyzMaterialPreview] = useState(null)
   const [effectInteractionPending, setEffectInteractionPending] = useState(false)
   const [placementSelection, setPlacementSelection] = useState(null)
   const summonEffectQueue = useRef([])
@@ -1741,8 +1955,11 @@ export default function App() {
     }
   }, [archetypeQuery, filters.archetypeId])
 
-  const oncePerTurn = oncePerTurnLabel(selected)
-  const extender = extenderLabel(selected)
+  const xyzMaterialsEntry = [...zones.monsterZone, ...zones.extraMonsterZone]
+      .find(entry => entry.instanceId === xyzMaterialsEntryId) ?? null
+  const displayedCard = xyzMaterialPreview ?? selected
+  const oncePerTurn = oncePerTurnLabel(displayedCard)
+  const extender = extenderLabel(displayedCard)
 
   function zoneEntry(card, moveReason = 'placed', treatedAs = null) {
     return { instanceId: `zone-${++zoneInstanceId.current}`, card, moveReason, treatedAs }
@@ -1809,6 +2026,9 @@ export default function App() {
     setActiveZoneContext(null)
     setActiveEffect(null)
     setEffectSelection(null)
+    setXyzDetachRequest(null)
+    setXyzMaterialsEntryId(null)
+    setXyzMaterialPreview(null)
     setPlacementSelection(card)
     summonEffectQueue.current = []
     setExtraDeckPickerOpen(false)
@@ -1931,6 +2151,9 @@ export default function App() {
     setSelectedEntry(null)
     setActiveEffect(null)
     setEffectSelection(null)
+    setXyzDetachRequest(null)
+    setXyzMaterialsEntryId(null)
+    setXyzMaterialPreview(null)
     setPlacementSelection(null)
     summonEffectQueue.current = []
     setComboOptions([])
@@ -1943,6 +2166,7 @@ export default function App() {
 
   function viewZoneCard(entry, zone) {
     if (!entry || !ZONE_KEYS.includes(zone)) return
+    if (xyzMaterialsEntryId && xyzMaterialsEntryId !== entry.instanceId) closeXyzMaterials()
     setComboHistory(prev => [...prev, snapshotComboState()])
     setSelected(entry.card)
     setSelectedEntry(entry)
@@ -1953,8 +2177,20 @@ export default function App() {
       ? previous
       : [...previous, entry.card])
     setEffectSelection(null)
+    setXyzMaterialPreview(null)
     setPlacementSelection(null)
     setError(null)
+  }
+
+  function showXyzMaterials(entry) {
+    if (!entry?.overlayMaterials?.length) return
+    setXyzMaterialsEntryId(entry.instanceId)
+    setXyzMaterialPreview(null)
+  }
+
+  function closeXyzMaterials() {
+    setXyzMaterialsEntryId(null)
+    setXyzMaterialPreview(null)
   }
 
   function promptOnSummonEffects(card, entry, zone = 'monsterZone') {
@@ -2007,8 +2243,10 @@ export default function App() {
       return
     }
 
+    const leavesMonsterField = MONSTER_FIELD_ZONES.includes(fromZone) && !MONSTER_FIELD_ZONES.includes(toZone)
+    const released = leavesMonsterField ? releaseXyzMaterials(entry) : { entry, releasedMaterials: [] }
     const movedEntry = {
-      ...entry,
+      ...released.entry,
       moveReason: toZone === 'monsterZone'
         ? 'normal-summon'
         : toZone === 'pendulumZone'
@@ -2017,16 +2255,19 @@ export default function App() {
       treatedAs: toZone === 'pendulumZone' ? 'Pendulum Card' : null,
     }
     setComboHistory(prev => [...prev, snapshotComboState()])
-    setZones(prev => ({
-      ...prev,
-      [fromZone]: prev[fromZone].filter(candidate => candidate.instanceId !== entry.instanceId),
-      [toZone]: [...prev[toZone], movedEntry],
-    }))
+    setZones(prev => {
+      const next = Object.fromEntries(ZONE_KEYS.map(zoneName => [zoneName, [...prev[zoneName]]]))
+      next[fromZone] = next[fromZone].filter(candidate => candidate.instanceId !== entry.instanceId)
+      next[toZone].push(movedEntry)
+      next.graveyard.push(...released.releasedMaterials.filter(material => !isTokenCard(material.card)))
+      return next
+    })
     setSelected(entry.card)
     setSelectedEntry(movedEntry)
     setActiveZoneContext(toZone)
     setActiveEffect(null)
     setComboOptions([])
+    if (leavesMonsterField && xyzMaterialsEntryId === entry.instanceId) closeXyzMaterials()
     setError(null)
     if (toZone === 'monsterZone') {
       promptOnSummonEffects(entry.card, movedEntry)
@@ -2036,10 +2277,15 @@ export default function App() {
   function removeZoneCard(entry, zone) {
     if (!ZONE_KEYS.includes(zone) || !zones[zone].some(candidate => candidate.instanceId === entry.instanceId)) return
     setComboHistory(prev => [...prev, snapshotComboState()])
-    setZones(previous => ({
-      ...previous,
-      [zone]: previous[zone].filter(candidate => candidate.instanceId !== entry.instanceId),
-    }))
+    const released = MONSTER_FIELD_ZONES.includes(zone)
+      ? releaseXyzMaterials(entry)
+      : { releasedMaterials: [] }
+    setZones(previous => {
+      const next = Object.fromEntries(ZONE_KEYS.map(zoneName => [zoneName, [...previous[zoneName]]]))
+      next[zone] = next[zone].filter(candidate => candidate.instanceId !== entry.instanceId)
+      next.graveyard.push(...released.releasedMaterials.filter(material => !isTokenCard(material.card)))
+      return next
+    })
     setActivatedEffects(previous => previous.filter(key => !key.startsWith(`${entry.instanceId}:`)))
     if (selectedEntry?.instanceId === entry.instanceId) {
       setSelectedEntry(null)
@@ -2047,6 +2293,7 @@ export default function App() {
       setActiveEffect(null)
       setComboOptions([])
     }
+    if (xyzMaterialsEntryId === entry.instanceId) closeXyzMaterials()
     setError(null)
   }
 
@@ -2066,34 +2313,42 @@ export default function App() {
       return
     }
 
+    const summonKind = extraDeckKind(card)
     const extraMonsterZoneWillBeOpen = zones.extraMonsterZone.every(entry => selectedIds.has(entry.instanceId))
     const remainingMainMonsters = zones.monsterZone.filter(entry => !selectedIds.has(entry.instanceId)).length
-    const destinationZone = extraMonsterZoneWillBeOpen
-      ? 'extraMonsterZone'
-      : linkedMainZoneCapacity(zones) > 0 && remainingMainMonsters < 5
+    const destinationZone = summonKind === 'Link'
+      ? extraMonsterZoneWillBeOpen
+        ? 'extraMonsterZone'
+        : linkedMainZoneCapacity(zones) > 0 && remainingMainMonsters < 5
+          ? 'monsterZone'
+          : null
+      : remainingMainMonsters < 5
         ? 'monsterZone'
-        : null
+        : extraMonsterZoneWillBeOpen
+          ? 'extraMonsterZone'
+          : null
     if (!destinationZone) {
       setError('No legal Extra Monster Zone or linked Main Monster Zone is available.')
       return
     }
 
-    const summonKind = extraDeckKind(card)
+    const transfersExistingMaterials = summonKind === 'Xyz'
+      && materials.length === 1
+      && xyzTransfersExistingMaterials(card.description)
+    const preparedMaterials = prepareXyzMaterials(materials, {
+      transferExistingMaterials: transfersExistingMaterials,
+    })
     const summonedEntry = {
       ...zoneEntry(card, `${summonKind.toLowerCase()}-summon`),
-      overlayMaterials: summonKind === 'Xyz' ? materials : [],
+      overlayMaterials: summonKind === 'Xyz' ? preparedMaterials.attachedMaterials : [],
     }
     setComboHistory(prev => [...prev, snapshotComboState()])
     setZones(prev => {
       const next = Object.fromEntries(ZONE_KEYS.map(zoneName => [zoneName, [...prev[zoneName]]]))
       next.monsterZone = next.monsterZone.filter(entry => !selectedIds.has(entry.instanceId))
       next.extraMonsterZone = next.extraMonsterZone.filter(entry => !selectedIds.has(entry.instanceId))
+      next.graveyard.push(...preparedMaterials.releasedMaterials.filter(material => !isTokenCard(material.card)))
       for (const material of materials) {
-        for (const overlay of material.overlayMaterials || []) {
-          if (!isTokenCard(overlay.card)) {
-            next.graveyard.push({ ...overlay, moveReason: 'detached-with-xyz', treatedAs: null })
-          }
-        }
         if (summonKind !== 'Xyz') {
           if (isTokenCard(material.card)) continue
           if ((material.card.type || '').toLowerCase().includes('pendulum')) {
@@ -2112,6 +2367,7 @@ export default function App() {
     setComboOptions([])
     setActiveEffect(null)
     setActiveZoneContext(destinationZone)
+    closeXyzMaterials()
     setExtraDeckPickerOpen(false)
     setError(null)
     promptOnSummonEffects(card, summonedEntry, destinationZone)
@@ -2204,6 +2460,7 @@ export default function App() {
   ) {
     const card = option.card
     const destination = (option.destination || '').toLowerCase()
+    const attachesAsXyzMaterial = destination.includes('xyz material')
     const destinationZone = destination.includes('pendulum zone')
       ? 'pendulumZone'
       : destination.includes('spell & trap zone')
@@ -2236,6 +2493,14 @@ export default function App() {
     const destinationEntry = destinationZone
       ? zoneEntry(card, destinationZone === 'monsterZone' ? 'summoned' : 'effect-resolution', treatedAs)
       : null
+    const xyzMaterialHost = attachesAsXyzMaterial
+      ? [...zones.monsterZone, ...zones.extraMonsterZone].find(entry =>
+        entry.instanceId === selectedEntry?.instanceId && extraDeckKind(entry.card) === 'Xyz')
+      : null
+    if (attachesAsXyzMaterial && !xyzMaterialHost) {
+      setError('Select the Xyz Monster that will receive this material before resolving the effect.')
+      return
+    }
     const effectText = (activeEffect?.text || '').toLowerCase()
     const movesSourceToBackrow = Boolean(selectedEntry
         && effectText.includes('place this card')
@@ -2260,19 +2525,42 @@ export default function App() {
         return
       }
     }
+    const attachmentSourceZones = xyzAttachmentSourceZones(activeEffect?.text)
+    const existingAttachmentEntry = attachesAsXyzMaterial
+      ? (attachmentSourceZones.length > 0 ? attachmentSourceZones : ZONE_KEYS)
+          .flatMap(zoneName => zones[zoneName]).find(entry =>
+        entry.instanceId !== xyzMaterialHost.instanceId && entry.card.id === card.id)
+      : null
+    if (attachesAsXyzMaterial && attachmentSourceZones.length > 0 && !existingAttachmentEntry) {
+      setError(`${card.name} is no longer in the location required by this attachment effect.`)
+      return
+    }
+    const attachmentResult = attachesAsXyzMaterial
+      ? attachXyzMaterials(xyzMaterialHost, [
+          existingAttachmentEntry ?? zoneEntry(card, 'effect-attached-as-xyz-material'),
+        ])
+      : null
+    const updatedXyzHost = attachesAsXyzMaterial
+      ? attachmentResult.entry
+      : null
     setComboHistory(prev => [...prev, snapshotComboState()])
     setZones(prev => {
       const next = Object.fromEntries(ZONE_KEYS.map(zone => [zone, [...prev[zone]]]))
 
       for (const material of paidMaterials) {
         let originZone = null
+        let paidEntry = null
         for (const zoneName of ZONE_KEYS) {
           const existingIndex = next[zoneName].findIndex(entry => entry.card.id === material.id)
           if (existingIndex >= 0) {
-            next[zoneName].splice(existingIndex, 1)
+            paidEntry = next[zoneName].splice(existingIndex, 1)[0]
             originZone = zoneName
             break
           }
+        }
+        if (paidEntry && MONSTER_FIELD_ZONES.includes(originZone)) {
+          const released = releaseXyzMaterials(paidEntry)
+          next.graveyard.push(...released.releasedMaterials.filter(entry => !isTokenCard(entry.card)))
         }
         if (materialDestination === 'Graveyard') {
           const isToken = (material.type || '').toLowerCase().includes('token')
@@ -2298,24 +2586,46 @@ export default function App() {
         for (const zoneName of ZONE_KEYS) {
           next[zoneName] = next[zoneName].filter(entry => entry.instanceId !== selectedEntry.instanceId)
         }
+        const released = releaseXyzMaterials(selectedEntry)
+        next.graveyard.push(...released.releasedMaterials.filter(entry => !isTokenCard(entry.card)))
         next.spellTrapZone.push({
-          ...selectedEntry,
+          ...released.entry,
           moveReason: 'placed-as-continuous',
           treatedAs: effectText.includes('continuous spell') ? 'Continuous Spell' : 'Continuous Trap',
         })
       }
 
-      if (destinationEntry) {
+      if (attachesAsXyzMaterial) {
+        if (existingAttachmentEntry) {
+          for (const zoneName of ZONE_KEYS) {
+            next[zoneName] = next[zoneName].filter(entry =>
+              entry.instanceId !== existingAttachmentEntry.instanceId)
+          }
+        }
+        next.graveyard.push(...attachmentResult.releasedMaterials.filter(entry => !isTokenCard(entry.card)))
+        for (const fieldZone of MONSTER_FIELD_ZONES) {
+          next[fieldZone] = next[fieldZone].map(entry => entry.instanceId === xyzMaterialHost.instanceId
+            ? updatedXyzHost
+            : entry)
+        }
+      }
+
+      if (destinationEntry && !attachesAsXyzMaterial) {
         next[destinationZone].push(destinationEntry)
       }
       return next
     })
-    setSelected(card)
-    setSelectedEntry(destinationEntry)
+    setSelected(attachesAsXyzMaterial ? xyzMaterialHost.card : card)
+    setSelectedEntry(attachesAsXyzMaterial ? updatedXyzHost : destinationEntry)
     setComboPath(prev => [...prev, card])
     setComboOptions([])
     setActiveEffect(null)
-    setActiveZoneContext(destinationZone)
+    setActiveZoneContext(attachesAsXyzMaterial ? activeZoneContext : destinationZone)
+    if (movesSourceToBackrow || paidMaterials.some(material =>
+      zones.monsterZone.concat(zones.extraMonsterZone).some(entry =>
+        entry.instanceId === xyzMaterialsEntryId && entry.card.id === material.id))) {
+      closeXyzMaterials()
+    }
     if (destinationZone === 'monsterZone') {
       promptOnSummonEffects(card, destinationEntry)
     }
@@ -2490,11 +2800,14 @@ export default function App() {
       setActiveZoneContext(zone)
       const checkedEffects = await Promise.all(effects.map(async effect => {
         const prerequisite = await effectPrerequisiteResult(card, effect, zone)
+        const materialReason = xyzMaterialCostReason(resolvedEntry, effect.text, zones)
         return {
           ...effect,
           prerequisitesChecked: true,
           legalSummonTargets: prerequisite.legalSummonTargets,
-          ...(!prerequisite.available ? { unavailableReason: prerequisite.reason } : {}),
+          ...(!prerequisite.available || materialReason
+            ? { unavailableReason: !prerequisite.available ? prerequisite.reason : materialReason }
+            : {}),
         }
       }))
       setEffectSelection({ card, entry: resolvedEntry, zone, effects: checkedEffects })
@@ -2506,6 +2819,7 @@ export default function App() {
 
   function closeEffectPicker() {
     setEffectSelection(null)
+    setXyzDetachRequest(null)
     if (summonEffectQueue.current.length > 0) {
       const [next, ...remaining] = summonEffectQueue.current
       summonEffectQueue.current = remaining
@@ -2513,12 +2827,58 @@ export default function App() {
     }
   }
 
-  async function chooseEffect(effect, applyOptional = false) {
+  function confirmXyzDetach(materialIds) {
+    const request = xyzDetachRequest
+    if (!request) return
+    setXyzDetachRequest(null)
+    chooseEffect(request.effect, request.applyOptional, materialIds)
+  }
+
+  async function chooseEffect(effect, applyOptional = false, detachedMaterialIds = null) {
     if (!effectSelection || effectRequestInFlight.current || effectResolutionInFlight.current) return
+    const selectionEntry = effectSelection.entry
+    const liveEntry = zones[effectSelection.zone]?.find(candidate =>
+      candidate.instanceId === selectionEntry?.instanceId) ?? selectionEntry
+    const detachPlan = xyzDetachCandidates(liveEntry, effect.text, zones)
+    const detachRequirement = detachPlan.requirement
+    const materialReason = xyzMaterialCostReason(liveEntry, effect.text, zones)
+    if (materialReason) {
+      setError(materialReason)
+      return
+    }
+    if (detachRequirement && detachedMaterialIds === null) {
+      setXyzDetachRequest({
+        effect,
+        applyOptional,
+        entry: liveEntry,
+        requirement: detachRequirement,
+        candidates: detachPlan.candidates,
+      })
+      return
+    }
+    if (detachRequirement) {
+      const availableIds = new Set(detachPlan.candidates.map(candidate => candidate.material.instanceId))
+      const uniqueIds = new Set(detachedMaterialIds)
+      const maximum = detachRequirement.all
+        ? availableIds.size
+        : Math.min(detachRequirement.max, availableIds.size)
+      const invalidAmount = detachRequirement.all
+        ? uniqueIds.size !== availableIds.size
+        : uniqueIds.size < detachRequirement.min || uniqueIds.size > maximum
+      const selectedCandidates = detachPlan.candidates.filter(candidate =>
+        uniqueIds.has(candidate.material.instanceId))
+      const repeatsType = detachRequirement.differentTypes
+        && new Set(selectedCandidates.map(candidate => materialCardCategory(candidate.material))).size !== uniqueIds.size
+      if (invalidAmount || repeatsType || [...uniqueIds].some(id => !availableIds.has(id))) {
+        setError('Choose a valid set of attached materials for this effect’s printed detach cost.')
+        return
+      }
+    }
     effectResolutionInFlight.current = true
     setEffectInteractionPending(true)
     try {
-      const { card, entry, zone } = effectSelection
+      const { card, zone } = effectSelection
+      let entry = liveEntry
     const prerequisite = effect.prerequisitesChecked && !effect.unavailableReason
       ? {
           available: !effect.unavailableReason,
@@ -2564,6 +2924,37 @@ export default function App() {
       return
     }
     setComboHistory(prev => [...prev, snapshotComboState()])
+    if (detachRequirement) {
+      const selectedIds = new Set(detachedMaterialIds)
+      const hostUpdates = new Map()
+      const detachedMaterials = []
+      for (const host of [...zones.monsterZone, ...zones.extraMonsterZone]) {
+        const idsForHost = (host.overlayMaterials || [])
+            .filter(material => selectedIds.has(material.instanceId))
+            .map(material => material.instanceId)
+        if (idsForHost.length === 0) continue
+        const detached = detachXyzMaterials(host, idsForHost)
+        hostUpdates.set(host.instanceId, detached.entry)
+        detachedMaterials.push(...detached.detachedMaterials)
+      }
+      entry = hostUpdates.get(entry?.instanceId) ?? entry
+      setZones(prev => {
+        const next = Object.fromEntries(ZONE_KEYS.map(zoneName => [zoneName, [...prev[zoneName]]]))
+        for (const fieldZone of MONSTER_FIELD_ZONES) {
+          next[fieldZone] = next[fieldZone].map(candidate =>
+            hostUpdates.get(candidate.instanceId) ?? candidate)
+        }
+        next.graveyard.push(...detachedMaterials.filter(material => !isTokenCard(material.card)))
+        return next
+      })
+      setXyzDetachRequest(null)
+      setXyzMaterialPreview(null)
+      const viewedHostAfterDetach = hostUpdates.get(xyzMaterialsEntryId)
+      if (viewedHostAfterDetach?.overlayMaterials.length === 0
+          || (entry?.overlayMaterials?.length === 0 && xyzMaterialsEntryId === entry.instanceId)) {
+        setXyzMaterialsEntryId(null)
+      }
+    }
     setActivatedEffects(prev => [...prev, effectUsageKey(entry, effect)])
     const activatedRestrictions = activationSummonRestrictions(card, effect.text)
     if (activatedRestrictions.length > 0) {
@@ -2589,37 +2980,41 @@ export default function App() {
         && ['monsterZone', 'extraMonsterZone'].includes(zone)
         && /\btribute this card\b/i.test(effect.text))
     if (paysSelfTribute) {
+      const released = releaseXyzMaterials(entry)
       const tributedEntry = {
-        ...entry,
+        ...released.entry,
         moveReason: 'tribute',
         treatedAs: null,
-        overlayMaterials: [],
       }
       setZones(prev => {
         const next = Object.fromEntries(ZONE_KEYS.map(zoneName => [zoneName, [...prev[zoneName]]]))
         next[zone] = next[zone].filter(candidate => candidate.instanceId !== entry.instanceId)
+        next.graveyard.push(...released.releasedMaterials.filter(material => !isTokenCard(material.card)))
         if (!isTokenCard(entry.card)) next.graveyard.push(tributedEntry)
         return next
       })
       resolvedZone = isTokenCard(entry.card) ? null : 'graveyard'
       setSelectedEntry(isTokenCard(entry.card) ? null : tributedEntry)
+      if (xyzMaterialsEntryId === entry.instanceId) closeXyzMaterials()
     } else if (placesSelfAsContinuousTrap) {
+      const released = releaseXyzMaterials(entry)
       const continuousTrapEntry = {
-        ...entry,
+        ...released.entry,
         moveReason: 'placed-as-continuous-trap',
         treatedAs: 'Continuous Trap',
-        overlayMaterials: [],
       }
       setZones(prev => {
         const next = Object.fromEntries(ZONE_KEYS.map(zoneName => [
           zoneName,
           prev[zoneName].filter(candidate => candidate.instanceId !== entry.instanceId),
         ]))
+        next.graveyard.push(...released.releasedMaterials.filter(material => !isTokenCard(material.card)))
         next.spellTrapZone.push(continuousTrapEntry)
         return next
       })
       resolvedZone = 'spellTrapZone'
       setSelectedEntry(continuousTrapEntry)
+      if (xyzMaterialsEntryId === entry.instanceId) closeXyzMaterials()
     } else if (entry && specialSummonsSelfFromZone(effect.text, zone)) {
       summonedEntry = {
         ...entry,
@@ -2694,6 +3089,7 @@ export default function App() {
     closeMaterialPicker()
     setExtraDeckPickerOpen(false)
     setPendulumPickerOpen(false)
+    closeXyzMaterials()
   }
 
   async function handleSearch(e) {
@@ -2711,6 +3107,7 @@ export default function App() {
     setComboPath([])
     setComboOptions([])
     setPlacementSelection(null)
+    closeXyzMaterials()
     setNameSuggestionsOpen(false)
 
     try {
@@ -2895,9 +3292,9 @@ export default function App() {
                 )}
 
                 <div ref={cardDetailPanelRef} className="card-detail-panel">
-                  {selected ? (
+                  {displayedCard ? (
                       <CardDetail
-                          card={selected}
+                          card={displayedCard}
                           oncePerTurn={oncePerTurn}
                           extender={extender}
                           comboPath={comboPath}
@@ -2918,8 +3315,15 @@ export default function App() {
                           onMoveCard={moveZoneCard}
                           onRemoveCard={removeZoneCard}
                           onClearZones={clearZones}
-                          placementPending={placementSelection?.id === selected.id}
+                          placementPending={!xyzMaterialPreview && placementSelection?.id === selected?.id}
                           onPlaceSearchResult={placeSearchResult}
+                          materialPreview={Boolean(xyzMaterialPreview)}
+                          xyzMaterialsEntry={xyzMaterialsEntry}
+                          onShowXyzMaterials={showXyzMaterials}
+                          onCloseXyzMaterials={closeXyzMaterials}
+                          onPreviewXyzMaterial={setXyzMaterialPreview}
+                          onStopPreviewXyzMaterial={() => setXyzMaterialPreview(null)}
+                          selectedEntryId={selectedEntry?.instanceId ?? null}
                       />
                   ) : !error && cards.length === 0 && (
                       <div className="empty-state">
@@ -2951,6 +3355,11 @@ export default function App() {
             busy={effectInteractionPending}
             onChoose={chooseEffect}
             onCancel={closeEffectPicker}
+        />
+        <XyzDetachPicker
+            request={xyzDetachRequest}
+            onConfirm={confirmXyzDetach}
+            onCancel={() => setXyzDetachRequest(null)}
         />
         {extraDeckPickerOpen && (
             <ExtraDeckSummonPicker
