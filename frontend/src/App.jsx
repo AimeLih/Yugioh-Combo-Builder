@@ -936,7 +936,10 @@ function EffectResolutionPicker({ request, hand, onConfirm, onCancel }) {
                       {card.cardImageUrl && <img src={card.cardImageUrl} alt="" loading="lazy" decoding="async" />}
                       <span>
                         <strong>{card.name}</strong>
-                        <small>{card.type} · Add another copy</small>
+                        <small className="effect-search-card-type">{card.type}</small>
+                        <small className="effect-search-card-description">
+                          {card.description || 'No card description available.'}
+                        </small>
                       </span>
                     </button>
                 ))}
