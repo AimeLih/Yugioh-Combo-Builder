@@ -1,9 +1,72 @@
 export function effectNeedsPrerequisiteCheck(effectText) {
-  const costClause = (effectText || '').split(';', 1)[0]
+  const text = effectText || ''
+  const semicolonIndex = text.indexOf(';')
+  const costClause = semicolonIndex >= 0 ? text.slice(0, semicolonIndex) : ''
+  const conditionClause = semicolonIndex >= 0 ? costClause : text.split(/[.]/, 1)[0]
   return /\b(?:discard|tribute|reveal)\b/i.test(costClause)
-      || /\bif you control\b/i.test(costClause)
-      || /\bif\b[^:;.]*\bon (?:your|the) field\b/i.test(costClause)
-      || /\b(?:fusion|synchro|xyz) summon\b/i.test(effectText || '')
+      || /\bif you control\b/i.test(conditionClause)
+      || /\bif\b[^:;.]*\bon (?:your|the) field\b/i.test(conditionClause)
+      || /\b(?:fusion|synchro|xyz) summon\b/i.test(text)
+}
+
+const EFFECT_NUMBER_WORDS = {
+  a: 1,
+  an: 1,
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+}
+
+function effectNumber(value) {
+  if (/^\d+$/.test(value || '')) return Number(value)
+  return EFFECT_NUMBER_WORDS[(value || '').toLowerCase()] ?? 0
+}
+
+export function effectSearchRequirement(effectText) {
+  const text = effectText || ''
+  const match = text.match(
+      /\badd\s+(up to\s+)?(\d+|one|two|three|four|five)\s+(?:"([^"]+)"\s+)?(cards?|monsters?|spells?|traps?)\s+from\s+(?:your|the)\s+deck\s+to\s+(?:your|the)\s+hand\b/i,
+  )
+  if (!match) return null
+
+  const count = effectNumber(match[2])
+  return {
+    count,
+    min: match[1] ? 1 : count,
+    max: count,
+    family: match[3] || '',
+    kind: match[4].replace(/s$/i, '').toLowerCase(),
+    matchIndex: match.index,
+  }
+}
+
+export function isEffectSearchCandidate(card, requirement) {
+  if (!card || !requirement) return false
+  const type = (card.type || '').toLowerCase()
+  if (/(?:fusion|synchro|xyz|link) monster/.test(type)) return false
+  if (requirement.kind === 'monster' && !type.includes('monster')) return false
+  if (requirement.kind === 'spell' && !type.includes('spell')) return false
+  if (requirement.kind === 'trap' && !type.includes('trap')) return false
+
+  if (!requirement.family) return true
+  const family = requirement.family.toLowerCase()
+  return (card.name || '').toLowerCase().includes(family)
+      || (card.archetype || '').toLowerCase().includes(family)
+}
+
+export function genericDiscardRequirement(effectText) {
+  const text = effectText || ''
+  const match = text.match(/\bdiscard\s+(\d+|a|one|two|three|four|five)\s+cards?\b/i)
+  if (!match) return null
+
+  const semicolonIndex = text.indexOf(';')
+  return {
+    count: effectNumber(match[1]),
+    phase: semicolonIndex >= 0 && match.index < semicolonIndex ? 'cost' : 'resolution',
+    matchIndex: match.index,
+  }
 }
 
 export function specialSummonsSelfFromZone(effectText, zone) {
