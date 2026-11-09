@@ -57,36 +57,6 @@ You can also view the repository's latest development history on the [GitHub Act
 
 ## Getting Started
 
-### Prerequisites
-
-- Java 17
-- Node.js and npm
-- PostgreSQL
-
-### 1. Configure the database
-
-Create a PostgreSQL database, then copy the example environment file:
-
-```bash
-cp .env.example .env
-```
-
-On PowerShell:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-Set the connection values in `.env`:
-
-```dotenv
-SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/yugioh
-SPRING_DATASOURCE_USERNAME=your_database_user
-SPRING_DATASOURCE_PASSWORD=your_database_password
-SPRING_CACHE_TYPE=simple
-IMPORT_TOKEN=choose_a_private_local_token
-```
-
 Flyway applies the database schema automatically at backend startup. The current
 schema version is V5. Cards use numeric foreign keys for types, races, attributes,
 and archetypes, while ordered link markers live in a child table.
@@ -121,49 +91,6 @@ does not fetch descriptions, stats, reference relationships, or link markers for
 every result. Selecting a card performs an exact-name lookup and loads its full
 details through the `Card.details` entity graph.
 
-### 2. Start the backend
-
-macOS/Linux:
-
-```bash
-./mvnw spring-boot:run
-```
-
-Windows:
-
-```powershell
-.\mvnw.cmd spring-boot:run
-```
-
-The API starts at `http://localhost:8080`.
-
-### 3. Import card data
-
-With the backend running against an empty database, import the current card catalog:
-
-```bash
-curl -X POST -H "X-Import-Token: choose_a_private_local_token" http://localhost:8080/yugioh/admin/import
-```
-
-The header value must match `IMPORT_TOKEN`. The import can take a moment because it fetches and stores card details and images from YGOPRODeck.
-
-### 4. Start the frontend
-
-In a second terminal:
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Open `http://localhost:5173`.
-
-The frontend uses `http://localhost:8080` by default. To point it at another backend, create `frontend/.env.local`:
-
-```dotenv
-VITE_API_URL=https://your-api.example.com
-```
 
 ## Using the App
 
@@ -203,31 +130,6 @@ The frontend requests 10 results for autocomplete, 50 for ordinary name
 searches, and up to 5,000 lightweight summaries when filters are active. The
 backend enforces a maximum of 5,000 search summaries and 10 archetype
 suggestions per request.
-
-## Tests and Builds
-
-Run the backend tests:
-
-```bash
-./mvnw test
-```
-
-On Windows, use `.\mvnw.cmd test`.
-
-Check and build the frontend:
-
-```bash
-cd frontend
-npm run lint
-npm run build
-npm test
-```
-
-Build the backend container:
-
-```bash
-docker build -t yugioh-combo-search .
-```
 
 ## Current Scope
 
