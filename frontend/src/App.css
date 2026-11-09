@@ -1901,12 +1901,28 @@ body { background: #060a12; }
   line-height: 1.35;
 }
 
-.effect-search-card-option {
+.xyz-detach-option.effect-search-card-option {
   grid-template-columns: 48px minmax(0, 1fr);
 }
 
-.effect-discard-card-option {
+.xyz-detach-option.effect-discard-card-option {
   grid-template-columns: 24px minmax(0, 1fr);
+}
+
+.xyz-detach-option.effect-search-card-option span,
+.xyz-detach-option.effect-discard-card-option span {
+  width: 100%;
+}
+
+.effect-resolution-step .effect-search-card-type {
+  color: #d6b84f;
+  font-weight: 600;
+}
+
+.effect-resolution-step .effect-search-card-description {
+  color: #e8cf78;
+  line-height: 1.45;
+  white-space: pre-line;
 }
 
 .effect-discard-card-option input[type='checkbox'] {
