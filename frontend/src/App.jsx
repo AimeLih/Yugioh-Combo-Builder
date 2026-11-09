@@ -3,7 +3,10 @@ import './App.css'
 import { activationSummonRestrictions, summonRestrictionReason } from './summonRestrictions.js'
 import { effectSourceZone } from './effectSourceZone.js'
 import {
+  effectSearchRequirement,
   effectNeedsPrerequisiteCheck,
+  genericDiscardRequirement,
+  isEffectSearchCandidate,
   isSpellTrapCard,
   specialSummonsSelfFromZone,
   spellTrapResolutionZone,
@@ -833,6 +836,151 @@ function XyzDetachPicker({ request, onConfirm, onCancel }) {
             <span>{selectedIds.length} selected · {amountLabel} required</span>
             <button type="button" disabled={!complete} onClick={() => onConfirm(selectedIds)}>
               Detach and Activate
+            </button>
+          </div>
+        </section>
+      </div>
+  )
+}
+
+function EffectResolutionPicker({ request, hand, onConfirm, onCancel }) {
+  const [selectedSearchIds, setSelectedSearchIds] = useState([])
+  const [discardChoices, setDiscardChoices] = useState([])
+  useEffect(() => {
+    setSelectedSearchIds([])
+    setDiscardChoices([])
+  }, [request?.effect.text])
+  if (!request) return null
+
+  const { searchRequirement, discardRequirement, searchCandidates, sourceEntryId } = request
+  const selectedSearchCards = selectedSearchIds
+      .map(id => searchCandidates.find(card => String(card.id) === String(id)))
+      .filter(Boolean)
+  const searchComplete = !searchRequirement
+      || selectedSearchIds.length >= searchRequirement.min
+        && selectedSearchIds.length <= searchRequirement.max
+  const handChoices = hand
+      .filter(entry => entry.instanceId !== sourceEntryId)
+      .map(entry => ({
+        key: `hand:${entry.instanceId}`,
+        label: entry.card.name,
+        detail: `${entry.card.type} · currently in Hand`,
+      }))
+  const searchedChoices = discardRequirement?.phase === 'resolution'
+    ? selectedSearchCards.map((card, index) => ({
+        key: `searched:${index}`,
+        label: card.name,
+        detail: `${card.type} · one of the searched cards`,
+      }))
+    : []
+  const randomChoices = discardRequirement
+    ? Array.from({ length: discardRequirement.count }, (_, index) => ({
+        key: `random:${index}`,
+        label: 'Random non-Effect Monster',
+        detail: 'Use a generic Normal Monster as discard filler',
+      }))
+    : []
+  const allDiscardChoices = [...handChoices, ...searchedChoices, ...randomChoices]
+  const discardComplete = !discardRequirement || discardChoices.length === discardRequirement.count
+  const complete = searchComplete && discardComplete
+
+  function addSearchCard(card) {
+    setSelectedSearchIds(current => current.length >= searchRequirement.max
+      ? current
+      : [...current, String(card.id)])
+    setDiscardChoices([])
+  }
+
+  function removeSearchCard(index) {
+    setSelectedSearchIds(current => current.filter((_, currentIndex) => currentIndex !== index))
+    setDiscardChoices([])
+  }
+
+  function toggleDiscard(key) {
+    setDiscardChoices(current => current.includes(key)
+      ? current.filter(choice => choice !== key)
+      : current.length < discardRequirement.count ? [...current, key] : current)
+  }
+
+  return (
+      <div className="material-picker-backdrop" role="presentation">
+        <section className="xyz-detach-picker effect-resolution-picker" role="dialog" aria-modal="true" aria-labelledby="effect-resolution-title">
+          <div className="material-picker-header">
+            <div>
+              <div className="material-picker-kicker">Resolve Card Effect</div>
+              <h3 id="effect-resolution-title">Choose cards in resolution order</h3>
+            </div>
+            <button type="button" className="material-picker-close" onClick={onCancel}>Close</button>
+          </div>
+
+          {searchRequirement && (
+            <section className="effect-resolution-step">
+              <h4>1. Add {searchRequirement.min === searchRequirement.max ? searchRequirement.max : `up to ${searchRequirement.max}`} {searchRequirement.family ? `“${searchRequirement.family}” ` : ''}{searchRequirement.kind}{searchRequirement.max === 1 ? '' : 's'}</h4>
+              <p className="xyz-detach-copy">Choose from the Deck. Selecting the same name more than once represents multiple copies.</p>
+              <div className="selected-materials">
+                {selectedSearchCards.map((card, index) => (
+                    <button key={`${card.id}-${index}`} type="button" onClick={() => removeSearchCard(index)}>
+                      {card.name} ×
+                    </button>
+                ))}
+              </div>
+              <div className="xyz-detach-options">
+                {searchCandidates.map(card => (
+                    <button
+                        key={card.id}
+                        type="button"
+                        className="xyz-detach-option"
+                        disabled={selectedSearchIds.length >= searchRequirement.max}
+                        onClick={() => addSearchCard(card)}
+                    >
+                      {card.cardImageUrl && <img src={card.cardImageUrl} alt="" />}
+                      <span>
+                        <strong>{card.name}</strong>
+                        <small>{card.type} · Add another copy</small>
+                      </span>
+                    </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {discardRequirement && (
+            <section className="effect-resolution-step">
+              <h4>{searchRequirement ? '2' : '1'}. Discard {discardRequirement.count} card{discardRequirement.count === 1 ? '' : 's'}</h4>
+              <p className="xyz-detach-copy">
+                Choose an eligible card, or use the random non-Effect Monster fallback.
+                {discardRequirement.phase === 'resolution' && searchRequirement ? ' A card added above may be discarded.' : ''}
+              </p>
+              <div className="xyz-detach-options">
+                {allDiscardChoices.map(choice => {
+                  const checked = discardChoices.includes(choice.key)
+                  return (
+                      <label key={choice.key} className={`xyz-detach-option${checked ? ' selected' : ''}`}>
+                        <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={!searchComplete}
+                            onChange={() => toggleDiscard(choice.key)}
+                        />
+                        <span>
+                          <strong>{choice.label}</strong>
+                          <small>{choice.detail}</small>
+                        </span>
+                      </label>
+                  )
+                })}
+              </div>
+            </section>
+          )}
+
+          <div className="xyz-detach-footer">
+            <span>{selectedSearchIds.length} searched · {discardChoices.length} discarded</span>
+            <button
+                type="button"
+                disabled={!complete}
+                onClick={() => onConfirm({ selectedSearchIds, discardChoices })}
+            >
+              Resolve Effect
             </button>
           </div>
         </section>
@@ -1871,6 +2019,7 @@ export default function App() {
   const [activeEffect, setActiveEffect] = useState(null)
   const [effectSelection, setEffectSelection] = useState(null)
   const [xyzDetachRequest, setXyzDetachRequest] = useState(null)
+  const [effectResolutionRequest, setEffectResolutionRequest] = useState(null)
   const [xyzMaterialsEntryId, setXyzMaterialsEntryId] = useState(null)
   const [xyzMaterialPreview, setXyzMaterialPreview] = useState(null)
   const [effectInteractionPending, setEffectInteractionPending] = useState(false)
@@ -2027,6 +2176,7 @@ export default function App() {
     setActiveEffect(null)
     setEffectSelection(null)
     setXyzDetachRequest(null)
+    setEffectResolutionRequest(null)
     setXyzMaterialsEntryId(null)
     setXyzMaterialPreview(null)
     setPlacementSelection(card)
@@ -2152,6 +2302,7 @@ export default function App() {
     setActiveEffect(null)
     setEffectSelection(null)
     setXyzDetachRequest(null)
+    setEffectResolutionRequest(null)
     setXyzMaterialsEntryId(null)
     setXyzMaterialPreview(null)
     setPlacementSelection(null)
@@ -2636,7 +2787,9 @@ export default function App() {
         && (option.card.type || '').toLowerCase().includes('fusion')
     const selfTributeAlreadyPaid = /\btribute this card\b/i.test(activeEffect?.text || '')
         && /^(?:you can\s+)?tribute this card[;.]?$/i.test((option.cost || '').trim())
-    if (!option.cost || selfTributeAlreadyPaid) {
+    const genericDiscardAlreadyPaid = activeEffect?.genericDiscardPaid
+        && /\bdiscard\s+(?:\d+|a|one|two|three|four|five)\s+cards?\b/i.test(option.cost || '')
+    if (!option.cost || selfTributeAlreadyPaid || genericDiscardAlreadyPaid) {
       finishComboChoice(option)
       return
     }
@@ -2820,6 +2973,7 @@ export default function App() {
   function closeEffectPicker() {
     setEffectSelection(null)
     setXyzDetachRequest(null)
+    setEffectResolutionRequest(null)
     if (summonEffectQueue.current.length > 0) {
       const [next, ...remaining] = summonEffectQueue.current
       summonEffectQueue.current = remaining
@@ -2834,7 +2988,102 @@ export default function App() {
     chooseEffect(request.effect, request.applyOptional, materialIds)
   }
 
-  async function chooseEffect(effect, applyOptional = false, detachedMaterialIds = null) {
+  async function prepareEffectResolutionRequest(effect, applyOptional, entry, detachedMaterialIds) {
+    const searchRequirement = effectSearchRequirement(effect.text)
+    const discardRequirement = genericDiscardRequirement(effect.text)
+    if (!searchRequirement && !discardRequirement) return null
+
+    let searchCandidates = []
+    if (searchRequirement) {
+      if (!searchRequirement.family) {
+        throw new Error('This multi-card search needs a named card family before the app can build its Deck choices.')
+      }
+      const response = await fetch(cardSearchUrl(
+          searchRequirement.family,
+          SEARCH_RESULT_LIMIT,
+          EMPTY_FILTERS,
+      ))
+      if (!response.ok) throw new Error('Could not load legal cards for this multi-card search.')
+      searchCandidates = (await response.json())
+          .filter(card => isEffectSearchCandidate(card, searchRequirement))
+          .sort((first, second) => first.name.localeCompare(second.name))
+      if (searchCandidates.length === 0) {
+        throw new Error('No legal cards were found for this multi-card search.')
+      }
+    }
+
+    return {
+      effect,
+      applyOptional,
+      detachedMaterialIds,
+      sourceEntryId: entry?.instanceId ?? null,
+      searchRequirement,
+      discardRequirement,
+      searchCandidates,
+    }
+  }
+
+  function confirmEffectResolution(selection) {
+    const request = effectResolutionRequest
+    if (!request) return
+    chooseEffect(request.effect, request.applyOptional, request.detachedMaterialIds, { request, selection })
+  }
+
+  function applyEffectResolutionSelection(request, selection) {
+    const selectedSearchCards = (selection.selectedSearchIds || [])
+        .map(id => request.searchCandidates.find(card => String(card.id) === String(id)))
+        .filter(Boolean)
+    const discardChoices = new Set(selection.discardChoices || [])
+
+    setZones(prev => {
+      const next = Object.fromEntries(ZONE_KEYS.map(zoneName => [zoneName, [...prev[zoneName]]]))
+
+      const handDiscardIds = new Set([...discardChoices]
+          .filter(choice => choice.startsWith('hand:'))
+          .map(choice => choice.slice('hand:'.length)))
+      const discardedHandEntries = next.hand.filter(entry => handDiscardIds.has(entry.instanceId))
+      next.hand = next.hand.filter(entry => !handDiscardIds.has(entry.instanceId))
+      next.graveyard.push(...discardedHandEntries.map(entry => ({
+        ...entry,
+        moveReason: 'discard',
+        treatedAs: null,
+        overlayMaterials: [],
+      })))
+
+      selectedSearchCards.forEach((card, index) => {
+        const searchedEntry = zoneEntry(card, 'searched-to-hand')
+        if (discardChoices.has(`searched:${index}`)) {
+          next.graveyard.push({
+            ...searchedEntry,
+            moveReason: 'discard',
+            treatedAs: null,
+            overlayMaterials: [],
+          })
+        } else {
+          next.hand.push(searchedEntry)
+        }
+      })
+
+      for (const choice of discardChoices) {
+        if (!choice.startsWith('random:')) continue
+        next.graveyard.push(zoneEntry({
+          id: `random-normal-${Date.now()}-${choice.slice('random:'.length)}`,
+          name: 'Random non-Effect Monster',
+          type: 'Normal Monster',
+          race: 'Unknown',
+          description: 'Generic non-Effect Monster used as discard filler.',
+        }, 'discard'))
+      }
+      return next
+    })
+  }
+
+  async function chooseEffect(
+      effect,
+      applyOptional = false,
+      detachedMaterialIds = null,
+      effectResolution = null,
+  ) {
     if (!effectSelection || effectRequestInFlight.current || effectResolutionInFlight.current) return
     const selectionEntry = effectSelection.entry
     const liveEntry = zones[effectSelection.zone]?.find(candidate =>
@@ -2923,6 +3172,50 @@ export default function App() {
       setError('The Spell & Trap Zones are full, so this card cannot be activated from the Hand.')
       return
     }
+    let preparedResolution = effectResolution?.request ?? null
+    if (!effectResolution) {
+      try {
+        preparedResolution = await prepareEffectResolutionRequest(
+            effect,
+            applyOptional,
+            entry,
+            detachedMaterialIds,
+        )
+      } catch (resolutionError) {
+        setError(resolutionError.message)
+        return
+      }
+      if (preparedResolution) {
+        setEffectResolutionRequest(preparedResolution)
+        return
+      }
+    }
+    if (effectResolution) {
+      const { request, selection } = effectResolution
+      const selectedSearchIds = selection.selectedSearchIds || []
+      const discardChoices = selection.discardChoices || []
+      const validSearchIds = new Set(request.searchCandidates.map(card => String(card.id)))
+      const validHandIds = new Set(zones.hand
+          .filter(handEntry => handEntry.instanceId !== request.sourceEntryId)
+          .map(handEntry => handEntry.instanceId))
+      const searchCountValid = !request.searchRequirement
+          || selectedSearchIds.length >= request.searchRequirement.min
+            && selectedSearchIds.length <= request.searchRequirement.max
+            && selectedSearchIds.every(id => validSearchIds.has(String(id)))
+      const discardCountValid = !request.discardRequirement
+          || discardChoices.length === request.discardRequirement.count
+            && discardChoices.every(choice => {
+              if (choice.startsWith('hand:')) return validHandIds.has(choice.slice('hand:'.length))
+              if (choice.startsWith('random:')) return true
+              if (!choice.startsWith('searched:') || request.discardRequirement.phase !== 'resolution') return false
+              const index = Number(choice.slice('searched:'.length))
+              return Number.isInteger(index) && index >= 0 && index < selectedSearchIds.length
+            })
+      if (!searchCountValid || !discardCountValid || new Set(discardChoices).size !== discardChoices.length) {
+        setError('Choose the printed number of search and discard cards before resolving this effect.')
+        return
+      }
+    }
     setComboHistory(prev => [...prev, snapshotComboState()])
     if (detachRequirement) {
       const selectedIds = new Set(detachedMaterialIds)
@@ -2967,12 +3260,14 @@ export default function App() {
     setActiveEffect({
       ...validatedEffect,
       optionalApplied: Boolean(applyOptional && optionalClause),
+      genericDiscardPaid: effectResolution?.request.discardRequirement?.phase === 'cost',
     })
     setComboOptions([])
     setSelected(card)
     setSelectedEntry(entry)
     setComboPath(prev => prev.at(-1)?.id === card.id ? prev : [...prev, card])
     closeEffectPicker()
+    setEffectResolutionRequest(null)
 
     let resolvedZone = zone
     let summonedEntry = null
@@ -3059,12 +3354,21 @@ export default function App() {
       setSelectedEntry(resolvedEntry)
     }
 
+    if (effectResolution) {
+      applyEffectResolutionSelection(effectResolution.request, effectResolution.selection)
+      setEffectResolutionRequest(null)
+    }
+
     setActiveZoneContext(resolvedZone)
     if (summonedEntry) {
       promptOnSummonEffects(card, summonedEntry)
     }
     const apiZone = ['graveyard', 'banished'].includes(zone) ? zone : null
+    if (preparedResolution?.searchRequirement) {
+      setComboOptions([])
+    } else {
       await fetchComboOptions(card, apiZone, validatedEffect)
+    }
     } finally {
       effectResolutionInFlight.current = false
       setEffectInteractionPending(false)
@@ -3360,6 +3664,12 @@ export default function App() {
             request={xyzDetachRequest}
             onConfirm={confirmXyzDetach}
             onCancel={() => setXyzDetachRequest(null)}
+        />
+        <EffectResolutionPicker
+            request={effectResolutionRequest}
+            hand={zones.hand}
+            onConfirm={confirmEffectResolution}
+            onCancel={() => setEffectResolutionRequest(null)}
         />
         {extraDeckPickerOpen && (
             <ExtraDeckSummonPicker
