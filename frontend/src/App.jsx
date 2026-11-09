@@ -929,11 +929,11 @@ function EffectResolutionPicker({ request, hand, onConfirm, onCancel }) {
                     <button
                         key={card.id}
                         type="button"
-                        className="xyz-detach-option"
+                        className="xyz-detach-option effect-search-card-option"
                         disabled={selectedSearchIds.length >= searchRequirement.max}
                         onClick={() => addSearchCard(card)}
                     >
-                      {card.cardImageUrl && <img src={card.cardImageUrl} alt="" />}
+                      {card.cardImageUrl && <img src={card.cardImageUrl} alt="" loading="lazy" decoding="async" />}
                       <span>
                         <strong>{card.name}</strong>
                         <small>{card.type} · Add another copy</small>
@@ -955,7 +955,7 @@ function EffectResolutionPicker({ request, hand, onConfirm, onCancel }) {
                 {allDiscardChoices.map(choice => {
                   const checked = discardChoices.includes(choice.key)
                   return (
-                      <label key={choice.key} className={`xyz-detach-option${checked ? ' selected' : ''}`}>
+                      <label key={choice.key} className={`xyz-detach-option effect-discard-card-option${checked ? ' selected' : ''}`}>
                         <input
                             type="checkbox"
                             checked={checked}
