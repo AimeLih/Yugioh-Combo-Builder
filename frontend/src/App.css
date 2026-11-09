@@ -1839,6 +1839,33 @@ body { background: #060a12; }
   font-size: 1.05rem;
 }
 
+.effect-resolution-picker {
+  width: min(760px, calc(100vw - 2rem));
+  max-height: min(86vh, 860px);
+  overflow-y: auto;
+}
+
+.effect-resolution-step {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.9rem 1rem;
+  border-top: 1px solid rgba(130, 151, 170, 0.2);
+}
+
+.effect-resolution-step h4 {
+  margin: 0;
+  color: #edf3f7;
+  font-size: 0.95rem;
+}
+
+.effect-resolution-step .xyz-detach-copy {
+  padding: 0;
+}
+
+.effect-resolution-step .selected-materials {
+  padding: 0;
+}
+
 .xyz-detach-copy {
   margin: 0;
   padding: 0.9rem 1.2rem;
