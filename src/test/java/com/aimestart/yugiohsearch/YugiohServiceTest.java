@@ -43,6 +43,20 @@ class YugiohServiceTest {
     }
 
     @Test
+    void discardAfterMultiCardSearchIsResolutionInsteadOfActivationCost() {
+        String effect = "When this card is activated: Add 2 \"Exosister\" monsters from your Deck "
+                + "to your hand, then discard 1 card.";
+        Card betrayal = card(1, "Exosister Betrayal", effect, "Spell Card", "Exosister");
+        when(repository.getCardByName(betrayal.getName())).thenReturn(betrayal);
+
+        ComboService.EffectPrerequisiteResult result = service.checkEffectPrerequisites(
+                new ComboService.EffectPrerequisiteRequest(
+                        betrayal.getName(), effect, "hand", Map.of("hand", List.of(betrayal.getName()))));
+
+        assertTrue(result.available());
+    }
+
+    @Test
     void constrainedDiscardDoesNotConsumeActivationUntilALegalCardIsInHand() {
         String effect = "You can discard 1 other \"Swordsoul\" card or 1 other Wyrm monster; "
                 + "Special Summon this card from your hand.";
