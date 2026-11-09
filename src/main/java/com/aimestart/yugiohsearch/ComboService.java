@@ -640,7 +640,8 @@ public class ComboService {
             Map<String, List<String>> zones
     ) {
         String costClause = effectText.split(";", 2)[0];
-        String lowerCost = safeLower(costClause);
+        String paymentClause = effectText.contains(";") ? costClause : "";
+        String lowerPayment = safeLower(paymentClause);
         List<String> hand = zones.getOrDefault("hand", Collections.emptyList());
 
         Matcher controlsNamedCard = Pattern.compile(
@@ -713,7 +714,7 @@ public class ComboService {
             }
         }
 
-        if (lowerCost.contains("discard this card")) {
+        if (lowerPayment.contains("discard this card")) {
             return "hand".equalsIgnoreCase(sourceZone)
                     ? ""
                     : "This effect requires discarding this card from the Hand.";
@@ -722,11 +723,11 @@ public class ComboService {
         Matcher discard = Pattern.compile(
                 "discard\\s+(\\d+|one|a)\\s+(.+)$",
                 Pattern.CASE_INSENSITIVE)
-                .matcher(costClause);
+                .matcher(paymentClause);
         if (discard.find()) {
             int required = wordCount(discard.group(1));
             boolean excludesSource = "hand".equalsIgnoreCase(sourceZone)
-                    && (lowerCost.contains("other") || lowerCost.contains("special summon this card"));
+                    && (lowerPayment.contains("other") || lowerPayment.contains("special summon this card"));
             int possibleCards = hand.size() - (excludesSource
                     ? (int) hand.stream().filter(name -> name.equalsIgnoreCase(source.getName())).findFirst().stream().count()
                     : 0);
@@ -757,7 +758,7 @@ public class ComboService {
         Matcher reveal = Pattern.compile(
                 "reveal\\s+(\\d+|one|a)\\s+(.+?)\\s+(?:in|from)\\s+your hand(?:$|[;,.])",
                 Pattern.CASE_INSENSITIVE)
-                .matcher(costClause);
+                .matcher(paymentClause);
         if (reveal.find()) {
             int required = wordCount(reveal.group(1));
             String requirement = reveal.group(2).trim();
@@ -783,12 +784,12 @@ public class ComboService {
         }
 
         Matcher tribute = Pattern.compile("tribute\\s+(\\d+|one|a)\\s+(?:other\\s+)?monsters?", Pattern.CASE_INSENSITIVE)
-                .matcher(costClause);
+                .matcher(paymentClause);
         if (tribute.find()) {
             int required = wordCount(tribute.group(1));
             int available = zones.getOrDefault("monsterZone", Collections.emptyList()).size()
                     + zones.getOrDefault("extraMonsterZone", Collections.emptyList()).size();
-            if (lowerCost.contains("other monster") && isFieldZone(sourceZone)) available--;
+            if (lowerPayment.contains("other monster") && isFieldZone(sourceZone)) available--;
             if (available < required) {
                 return "This effect requires " + required + " monster" + (required == 1 ? "" : "s")
                         + " on the field to Tribute.";
