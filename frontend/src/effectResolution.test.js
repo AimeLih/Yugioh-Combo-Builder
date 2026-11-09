@@ -2,17 +2,52 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  effectSearchRequirement,
   effectNeedsPrerequisiteCheck,
+  genericDiscardRequirement,
+  isEffectSearchCandidate,
   isSpellTrapCard,
   specialSummonsSelfFromZone,
   spellTrapResolutionZone,
 } from './effectResolution.js'
+
+const betrayalEffect = 'When this card is activated: Add 2 "Exosister" monsters from your Deck to your hand, then discard 1 card.'
 
 const pharaohEffect = 'If this card is in your hand: You can reveal 1 Spell in your hand; '
     + 'Special Summon this card, then you can Set 1 Spell/Trap that mentions "Dark Magician" from your Deck.'
 
 test('reveal requirements are checked before an effect can be activated', () => {
   assert.equal(effectNeedsPrerequisiteCheck(pharaohEffect), true)
+})
+
+test('a discard performed after a search is resolution, not an activation prerequisite', () => {
+  assert.equal(effectNeedsPrerequisiteCheck(betrayalEffect), false)
+  assert.deepEqual(effectSearchRequirement(betrayalEffect), {
+    count: 2,
+    min: 2,
+    max: 2,
+    family: 'Exosister',
+    kind: 'monster',
+    matchIndex: 29,
+  })
+  assert.deepEqual(genericDiscardRequirement(betrayalEffect), {
+    count: 1,
+    phase: 'resolution',
+    matchIndex: 90,
+  })
+})
+
+test('generic discard costs remain activation prerequisites', () => {
+  const effect = 'You can discard 1 card; draw 1 card.'
+  assert.equal(effectNeedsPrerequisiteCheck(effect), true)
+  assert.equal(genericDiscardRequirement(effect).phase, 'cost')
+})
+
+test('multi-card searches filter the requested family and exclude Extra Deck monsters', () => {
+  const requirement = effectSearchRequirement(betrayalEffect)
+  assert.equal(isEffectSearchCandidate({ name: 'Exosister Martha', archetype: 'Exosister', type: 'Effect Monster' }, requirement), true)
+  assert.equal(isEffectSearchCandidate({ name: 'Exosister Mikailis', archetype: 'Exosister', type: 'Xyz Monster' }, requirement), false)
+  assert.equal(isEffectSearchCandidate({ name: 'Unrelated Monster', archetype: 'Other', type: 'Effect Monster' }, requirement), false)
 })
 
 test('a hand effect that says Special Summon this card moves its source, not another monster', () => {
