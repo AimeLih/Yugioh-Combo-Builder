@@ -12,7 +12,7 @@ import {
   xyzAlternateMaterialDescriptor,
   xyzAttachmentSourceZones,
   xyzTransfersExistingMaterials,
-} from './xyzMaterials.js'
+} from '../xyzMaterials.js'
 
 const material = (instanceId, name, overlayMaterials = []) => ({
   instanceId,

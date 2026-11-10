@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { effectSourceZone } from './effectSourceZone.js'
+import { effectSourceZone } from '../effectSourceZone.js'
 
 const brandedBond = {
   name: 'Branded Bond',

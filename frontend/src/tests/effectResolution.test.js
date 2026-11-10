@@ -9,7 +9,7 @@ import {
   isSpellTrapCard,
   specialSummonsSelfFromZone,
   spellTrapResolutionZone,
-} from './effectResolution.js'
+} from '../effectResolution.js'
 
 const betrayalEffect = 'When this card is activated: Add 2 "Exosister" monsters from your Deck to your hand, then discard 1 card.'
 

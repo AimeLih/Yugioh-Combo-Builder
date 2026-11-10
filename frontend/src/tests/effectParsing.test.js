@@ -1,8 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { isPassiveEffectText, splitCardEffects } from './effectParsing.js'
-import { effectSourceZone } from './effectSourceZone.js'
+import { isPassiveEffectText, splitCardEffects } from '../effectParsing.js'
+import { effectSourceZone } from '../effectSourceZone.js'
 
 const card = {
   name: "Dark Magician, the Pharaoh's Servant",

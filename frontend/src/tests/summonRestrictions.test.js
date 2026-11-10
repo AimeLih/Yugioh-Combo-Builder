@@ -4,7 +4,7 @@ import {
   activationSummonRestrictions,
   restrictionAllowsCard,
   summonRestrictionReason,
-} from './summonRestrictions.js'
+} from '../summonRestrictions.js'
 
 const trudea = {
   id: 1,
