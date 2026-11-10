@@ -77,10 +77,12 @@ public class YugiohController {
             @RequestParam(required = false) Integer raceId,
             @RequestParam(required = false) Integer attributeId,
             @RequestParam(required = false) Integer archetypeId,
+            @RequestParam(required = false) Integer level,
+            @RequestParam(required = false) Boolean tuner,
             @RequestParam(defaultValue = "50") int limit
     ) {
         return cardCatalogService.getCardsBySubstring(
-                name, typeId, raceId, attributeId, archetypeId, limit);
+                name, typeId, raceId, attributeId, archetypeId, level, tuner, limit);
     }
 
     @GetMapping("/card/filters")
