@@ -20,6 +20,7 @@ target/
 *.ipr
 docker-compose.yml
 .env
+output
 ### NetBeans ###
 /nbproject/private/
 /nbbuild/
