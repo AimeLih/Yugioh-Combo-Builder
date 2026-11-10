@@ -29,16 +29,16 @@ import AuthControls from './AuthControls.jsx'
 function typeColor(type) {
   if (!type) return '#1a3a5c'
   const t = type.toLowerCase()
-  if (t.includes('spell')) return '#1d7a4b'
-  if (t.includes('trap')) return '#7a1d6b'
+  if (t.includes('spell')) return '#08a190'
+  if (t.includes('trap')) return '#a5158f'
   if (t.includes('fusion')) return '#8b3db5'
-  if (t.includes('synchro')) return '#4a4a5a'
-  if (t.includes('xyz')) return '#1a1a2a'
-  if (t.includes('link')) return '#0b3d8c'
-  if (t.includes('ritual')) return '#2a4fa0'
-  if (t.includes('pendulum')) return '#2a7a6a'
+  if (t.includes('synchro')) return '#bfbfc5'
+  if (t.includes('xyz')) return '#5c5454'
+  if (t.includes('link')) return '#4a80da'
+  if (t.includes('ritual')) return '#396bdf'
+  if (t.includes('pendulum')) return '#45c9ad'
   if (t.includes('normal')) return '#8b7510'
-  return '#8b4a00'
+  return '#a55800'
 }
 
 function Stars({ count }) {
@@ -459,6 +459,12 @@ function extenderLabel(card) {
   const text = (card?.description || '').toLowerCase()
   if (/summon\s+\d+/.test(text)) return 'summon extender'
   if (/add\s+\d+/.test(text)) return 'add extender'
+  return null
+}
+
+function tunerLabel(card){
+  const text = (card?.type || '').toLowerCase()
+  if (/tuner/.test(text)) return 'tuner'
   return null
 }
 
@@ -1588,6 +1594,7 @@ function SummonTargetPicker({
 function CardDetail({
   card,
   oncePerTurn,
+    tuner,
   extender,
   comboPath,
   comboOptions,
@@ -1616,8 +1623,12 @@ function CardDetail({
   onPreviewXyzMaterial,
   onStopPreviewXyzMaterial,
   selectedEntryId,
+  detailsOpenRequest,
+  onPanelVisibilityChange,
 }) {
   const [summonTargetPickerOpen, setSummonTargetPickerOpen] = useState(false)
+  const [detailsOpen, setDetailsOpen] = useState(true)
+  const [zonesOpen, setZonesOpen] = useState(true)
   const color = typeColor(card.type)
   const t = (card.type || '').toLowerCase()
   const isMonster = t.includes('monster')
@@ -1626,13 +1637,21 @@ function CardDetail({
   const isPendulum = t.includes('pendulum')
   const hasImage = Boolean(card.cardImageUrl)
   const placementOptions = manualPlacementZones(card)
-  const hasBadges = oncePerTurn || extender === 'summon extender' || extender === 'add extender' || card.staple === true || card.weight > 0
+  const hasBadges = oncePerTurn || tuner || extender === 'summon extender' || extender === 'add extender' || card.staple === true || card.weight > 0
   const continuingOptions = comboOptions?.filter(option => option.label !== 'ender') ?? []
   const enderOptions = comboOptions?.filter(option => option.label === 'ender') ?? []
 
   useEffect(() => {
     setSummonTargetPickerOpen(false)
   }, [card.id, activeEffect?.text])
+
+  useEffect(() => {
+    setDetailsOpen(true)
+  }, [detailsOpenRequest])
+
+  useEffect(() => {
+    onPanelVisibilityChange({ detailsOpen, zonesOpen })
+  }, [detailsOpen, zonesOpen, onPanelVisibilityChange])
 
   function timingLockReason(option) {
     const destination = (option.destination || '').toLowerCase()
@@ -1686,9 +1705,31 @@ function CardDetail({
     : enderOptions
 
   return (
-      <div className="wiki-card">
+      <div className="card-detail-workspace">
+        {(!detailsOpen || !zonesOpen) && (
+            <div className="card-panel-toggle-bar" aria-label="Hidden card panels">
+              {!detailsOpen && (
+                  <button type="button" onClick={() => setDetailsOpen(true)}>Show Card Details</button>
+              )}
+              {!zonesOpen && (
+                  <button type="button" onClick={() => setZonesOpen(true)}>Show Zones</button>
+              )}
+            </div>
+        )}
+
+        <div className={`wiki-body${detailsOpen ? '' : ' details-closed'}${zonesOpen ? '' : ' zones-closed'}`}>
+        {detailsOpen && (
+          <section className="wiki-card" aria-label={`${card.name} card details`}>
         <div className="wiki-banner" style={{ background: color }}>
           <h2 className="wiki-name">{card.name}</h2>
+          <button
+              type="button"
+              className="panel-close-btn card-details-close-btn"
+              onClick={() => setDetailsOpen(false)}
+              aria-label="Close card details"
+          >
+            Close
+          </button>
           {placementPending && (
               <div className="card-placement-actions" aria-label={`Place ${card.name}`}>
                 <span className="card-placement-label">Place in</span>
@@ -1713,7 +1754,6 @@ function CardDetail({
           )}
         </div>
 
-        <div className="wiki-body">
           <div className="wiki-primary-col">
             <div className="wiki-image-col">
               <div className="wiki-image-frame" style={{ borderColor: color }}>
@@ -1768,6 +1808,7 @@ function CardDetail({
                       {extender === 'add extender' && <Badge label="Add Extender" color="#1a4f8b" />}
                       {card.staple === true && <Badge label="Staple" color="#b5891e" />}
                       {card.weight > 0 && <Badge label={`Weight ${card.weight}`} color="#334" />}
+                      {tuner && <Badge label="Tuner" color="#095704" />}
                     </span>
                   </div>
               )}
@@ -1914,11 +1955,24 @@ function CardDetail({
 
             </div>
           </div>
+          </section>
+        )}
 
-          <aside className="wiki-zones-col" aria-label="Current field and other zones">
+        {zonesOpen && (
+          <aside className="wiki-zones-col" aria-label="Current Field">
             <div className="wiki-section-header zone-section-header zone-section-heading-row">
               <span>Current Field &amp; Other Zones</span>
-              <button type="button" className="clear-zones-btn" onClick={onClearZones}>Clear Zones</button>
+              <div className="zone-heading-actions">
+                <button type="button" className="clear-zones-btn" onClick={onClearZones}>Clear Zones</button>
+                <button
+                    type="button"
+                    className="panel-close-btn"
+                    onClick={() => setZonesOpen(false)}
+                    aria-label="Close zones"
+                >
+                  Close
+                </button>
+              </div>
             </div>
             <SimulatedZones
                 zones={zones}
@@ -1940,6 +1994,7 @@ function CardDetail({
                 onStopPreview={onStopPreviewXyzMaterial}
             />
           </aside>
+        )}
         </div>
       </div>
   )
@@ -1978,7 +2033,14 @@ function CardListItem({ card, selected, loading, onClick }) {
 }
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8080'
-const EMPTY_FILTERS = { typeId: '', raceId: '', attributeId: '', archetypeId: '' }
+const EMPTY_FILTERS = {
+  typeId: '',
+  raceId: '',
+  attributeId: '',
+  archetypeId: '',
+  level: '',
+  tuner: '',
+}
 const AUTOCOMPLETE_LIMIT = 10
 const SEARCH_RESULT_LIMIT = 1000
 const FILTERED_SEARCH_RESULT_LIMIT = 5000
@@ -2037,6 +2099,8 @@ export default function App() {
   const [extraDeckPickerOpen, setExtraDeckPickerOpen] = useState(false)
   const [pendulumPickerOpen, setPendulumPickerOpen] = useState(false)
   const [comboLoading, setComboLoading] = useState(false)
+  const [detailsOpenRequest, setDetailsOpenRequest] = useState(0)
+  const [cardPanelVisibility, setCardPanelVisibility] = useState({ detailsOpen: true, zonesOpen: true })
   const [loading, setLoading] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
   const [pendingCardId, setPendingCardId] = useState(null)
@@ -2112,6 +2176,9 @@ export default function App() {
   const displayedCard = xyzMaterialPreview ?? selected
   const oncePerTurn = oncePerTurnLabel(displayedCard)
   const extender = extenderLabel(displayedCard)
+  const tuner = tunerLabel(displayedCard)
+  const bothCardPanelsClosed = !displayedCard
+      || (!cardPanelVisibility.detailsOpen && !cardPanelVisibility.zonesOpen)
 
   function zoneEntry(card, moveReason = 'placed', treatedAs = null) {
     return { instanceId: `zone-${++zoneInstanceId.current}`, card, moveReason, treatedAs }
@@ -2191,6 +2258,7 @@ export default function App() {
   }
 
   async function openSearchResult(cardSummary) {
+    setDetailsOpenRequest(previous => previous + 1)
     const now = Date.now()
     const existingLock = cardResultClickLocks.current.get(cardSummary.id)
     if (existingLock?.inFlight || (existingLock?.cooldownUntil ?? 0) > now) return
@@ -3434,6 +3502,11 @@ export default function App() {
   }
 
   const showList = cards.length > 0
+  const resultDensity = cards.length <= 50
+    ? 'result-density-low'
+    : cards.length <= 100
+      ? 'result-density-medium'
+      : 'result-density-high'
   const activeFilterCount = Object.values(filters).filter(Boolean).length
 
   return (
@@ -3527,6 +3600,23 @@ export default function App() {
                       ))}
                     </select>
                   </label>
+                  <label>
+                    <span>Level</span>
+                    <select value={filters.level} onChange={e => updateFilter('level', e.target.value)}>
+                      <option value="">All Levels</option>
+                      {Array.from({ length: 13 }, (_, index) => index + 1).map(level => (
+                          <option key={level} value={level}>Level {level}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Tuner</span>
+                    <select value={filters.tuner} onChange={e => updateFilter('tuner', e.target.value)}>
+                      <option value="">All Cards</option>
+                      <option value="true">Tuners Only</option>
+                      <option value="false">Non-Tuners Only</option>
+                    </select>
+                  </label>
                   <label className="archetype-filter">
                     <span>Archetype</span>
                     <div className="autocomplete">
@@ -3582,9 +3672,9 @@ export default function App() {
           )}
 
           {!loading && (
-              <div className={`results-layout${showList ? '' : ' no-card-list'}`}>
+              <div className={`results-layout${showList ? '' : ' no-card-list'}${bothCardPanelsClosed ? ' panels-closed' : ''}`}>
                 {showList && (
-                    <div className="card-list-panel">
+                    <div className={`card-list-panel ${resultDensity}`}>
                       <div className="panel-label">{cards.length} results</div>
                       {cards.map(c => (
                           <CardListItem
@@ -3603,6 +3693,7 @@ export default function App() {
                       <CardDetail
                           card={displayedCard}
                           oncePerTurn={oncePerTurn}
+                          tuner = {tuner}
                           extender={extender}
                           comboPath={comboPath}
                           comboOptions={comboOptions}
@@ -3631,6 +3722,8 @@ export default function App() {
                           onPreviewXyzMaterial={setXyzMaterialPreview}
                           onStopPreviewXyzMaterial={() => setXyzMaterialPreview(null)}
                           selectedEntryId={selectedEntry?.instanceId ?? null}
+                          detailsOpenRequest={detailsOpenRequest}
+                          onPanelVisibilityChange={setCardPanelVisibility}
                       />
                   ) : !error && cards.length === 0 && (
                       <div className="empty-state">
@@ -3642,6 +3735,12 @@ export default function App() {
               </div>
           )}
         </main>
+        <footer className="app-footer">
+          <div>© 2026 Aime Lihono. All rights reserved.</div>
+          <div>
+            Third-party names, trademarks, card data, and artwork—including Yu-Gi-Oh! materials—remain the property of their respective owners.
+          </div>
+        </footer>
         <MaterialPicker
             pendingOption={pendingOption}
             materialPlan={materialPlan}
