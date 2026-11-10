@@ -52,6 +52,12 @@ public interface CardRepository extends JpaRepository<Card, Long> {
               and (:raceId is null or raceReference.id = :raceId)
               and (:attributeId is null or attributeReference.id = :attributeId)
               and (:archetypeId is null or archetypeReference.id = :archetypeId)
+              and (:level is null or card.level = :level)
+              and (
+                :tuner is null
+                or (:tuner = true and lower(typeReference.name) like '%tuner%')
+                or (:tuner = false and lower(typeReference.name) not like '%tuner%')
+              )
             order by card.name asc
             """)
     List<CardSearchSummaryView> findSearchSummariesByName(
@@ -60,6 +66,8 @@ public interface CardRepository extends JpaRepository<Card, Long> {
             @Param("raceId") Integer raceId,
             @Param("attributeId") Integer attributeId,
             @Param("archetypeId") Integer archetypeId,
+            @Param("level") Integer level,
+            @Param("tuner") Boolean tuner,
             Pageable pageable
     );
 
