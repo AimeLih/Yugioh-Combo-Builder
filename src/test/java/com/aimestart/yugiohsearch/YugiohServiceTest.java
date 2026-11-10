@@ -911,11 +911,13 @@ class YugiohServiceTest {
                 org.mockito.ArgumentMatchers.isNull(),
                 org.mockito.ArgumentMatchers.isNull(),
                 org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.isNull(),
                 org.mockito.ArgumentMatchers.any(org.springframework.data.domain.Pageable.class)))
                 .thenReturn(List.of(linkuriboh));
 
         List<CardCatalogService.CardSearchSummary> results = cardCatalogService.getCardsBySubstring(
-                "linku", null, null, null, null, 20);
+                "linku", null, null, null, null, null, null, 20);
 
         assertEquals(1, results.size());
         assertEquals("1 Level 1 monster", results.get(0).description());
