@@ -3513,7 +3513,7 @@ export default function App() {
       <div className="app">
         <header className="app-header">
           <div className="header-title">
-            <span className="title-accent">Yu-Gi-Oh!</span> Card Search
+            <span className="title-accent">Yu-Gi-Oh!</span> Combo Builder
           </div>
           <AuthControls />
         </header>
