@@ -134,3 +134,11 @@ suggestions per request.
 ## Current Scope
 
 The simulator validates general rulebook behavior and parsed card text; it is not a tournament judge. Individual rulings, errata, Forbidden/Limited lists, and tournament policy are outside the current scope.
+
+## License
+
+Copyright © 2026 Aime Lihono. All rights reserved.
+
+This project is publicly viewable for portfolio purposes. Copying,
+redistribution, deployment, or creation of derivative works is not
+permitted without written authorization. See [LICENSE](LICENSE).
