@@ -650,7 +650,14 @@ body { background: #060a12; }
   grid-template-columns: minmax(0, 1fr);
 }
 
+.results-layout.panels-closed .card-detail-panel {
+  grid-column: 1;
+  grid-row: 1;
+}
+
 .results-layout.panels-closed .card-list-panel {
+  grid-column: 1;
+  grid-row: 2;
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.65rem;
