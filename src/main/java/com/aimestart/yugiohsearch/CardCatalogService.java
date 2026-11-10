@@ -91,6 +91,8 @@ public class CardCatalogService {
             Integer raceId,
             Integer attributeId,
             Integer archetypeId,
+            Integer level,
+            Boolean tuner,
             int limit
     ) {
         List<CardSearchSummary> cards = cardRepository
@@ -100,6 +102,8 @@ public class CardCatalogService {
                         raceId,
                         attributeId,
                         archetypeId,
+                        level,
+                        tuner,
                         PageRequest.of(0, Math.max(1, Math.min(limit, MAX_SEARCH_RESULTS))))
                 .stream()
                 .map(card -> new CardSearchSummary(
