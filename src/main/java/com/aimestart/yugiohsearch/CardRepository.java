@@ -50,6 +50,7 @@ public interface CardRepository extends JpaRepository<Card, Long> {
             where upper(card.name) like upper(concat('%', :name, '%'))
               and (:typeId is null or typeReference.id = :typeId)
               and (:raceId is null or raceReference.id = :raceId)
+              and (:fieldSpell is null or :fieldSpell = false or lower(raceReference.name) = 'field')
               and (:attributeId is null or attributeReference.id = :attributeId)
               and (:archetypeId is null or archetypeReference.id = :archetypeId)
               and (:level is null or card.level = :level)
@@ -64,6 +65,7 @@ public interface CardRepository extends JpaRepository<Card, Long> {
             @Param("name") String name,
             @Param("typeId") Integer typeId,
             @Param("raceId") Integer raceId,
+            @Param("fieldSpell") Boolean fieldSpell,
             @Param("attributeId") Integer attributeId,
             @Param("archetypeId") Integer archetypeId,
             @Param("level") Integer level,
