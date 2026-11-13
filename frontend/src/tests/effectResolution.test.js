@@ -2,14 +2,36 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  coinTossRequirement,
   effectSearchRequirement,
   effectNeedsPrerequisiteCheck,
   genericDiscardRequirement,
+  historicalGraveyardRequirement,
+  historicalPrerequisiteFailure,
   isEffectSearchCandidate,
+  isFieldSpell,
   isSpellTrapCard,
+  placeFieldSpell,
   specialSummonsSelfFromZone,
   spellTrapResolutionZone,
 } from '../effectResolution.js'
+
+test('coin toss effects expose the printed toss count', () => {
+  assert.deepEqual(coinTossRequirement('Toss a coin and call it. If you call it right: Draw 1 card.'), { count: 1 })
+  assert.deepEqual(coinTossRequirement('Toss 3 coins.'), { count: 3 })
+})
+
+test('turn history preserves controlled monster graveyard requirements', () => {
+  const effect = 'If a Level 8 or higher monster under your control was sent to the Graveyard this turn: Special Summon 1 "Berserk Dragon" from your hand or Deck.'
+  assert.deepEqual(historicalGraveyardRequirement(effect), { minimumLevel: 8 })
+  assert.equal(effectNeedsPrerequisiteCheck(effect), true)
+  assert.match(historicalPrerequisiteFailure(effect, []), /Level 8 or higher/)
+  assert.equal(historicalPrerequisiteFailure(effect, [{
+    type: 'sent-to-graveyard',
+    wasControlled: true,
+    card: { level: 8 },
+  }]), '')
+})
 
 const betrayalEffect = 'When this card is activated: Add 2 "Exosister" monsters from your Deck to your hand, then discard 1 card.'
 
@@ -102,6 +124,23 @@ test('Continuous Spells and Traps remain in the Spell and Trap Zone', () => {
       ),
       'spellTrapZone',
   )
+})
+
+test('Field Spells resolve to their dedicated Field Zone', () => {
+  const fieldSpell = { type: 'Spell Card', race: 'Field' }
+  assert.equal(isFieldSpell(fieldSpell), true)
+  assert.equal(spellTrapResolutionZone(fieldSpell, null, 'All monsters gain 500 ATK.'), 'fieldZone')
+})
+
+test('playing a new Field Spell sends the previous one to the Graveyard', () => {
+  const oldEntry = { instanceId: 'old', card: { name: 'Old Field', type: 'Spell Card', race: 'Field' } }
+  const newEntry = { instanceId: 'new', card: { name: 'New Field', type: 'Spell Card', race: 'Field' } }
+  const zones = { fieldZone: [oldEntry], graveyard: [] }
+
+  assert.equal(placeFieldSpell(zones, newEntry), oldEntry)
+  assert.deepEqual(zones.fieldZone, [newEntry])
+  assert.equal(zones.graveyard[0].card.name, 'Old Field')
+  assert.equal(zones.graveyard[0].moveReason, 'field-spell-replaced')
 })
 
 test('explicit self movement overrides normal Spell and Trap cleanup', () => {
