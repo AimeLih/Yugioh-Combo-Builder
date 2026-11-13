@@ -6,7 +6,35 @@ export function effectNeedsPrerequisiteCheck(effectText) {
   return /\b(?:discard|tribute|reveal)\b/i.test(costClause)
       || /\bif you control\b/i.test(conditionClause)
       || /\bif\b[^:;.]*\bon (?:your|the) field\b/i.test(conditionClause)
+      || /\blevel\s+\d+\s+or higher monster(?:\(s\)|s?) (?:you controlled|under your control) (?:was|were) sent (?:from (?:your|the) field )?to (?:(?:your|the) )?(?:gy|graveyard) this turn\b/i.test(text)
       || /\b(?:fusion|synchro|xyz) summon\b/i.test(text)
+}
+
+export function coinTossRequirement(effectText) {
+  const text = effectText || ''
+  const match = text.match(/\b(?:toss|flip)\s+(?:(\d+|a|one|two|three|four|five)\s+)?coins?\b/i)
+  if (!match) return null
+  return {
+    count: Math.max(1, effectNumber(match[1] || 'a')),
+  }
+}
+
+export function historicalGraveyardRequirement(effectText) {
+  const match = (effectText || '').match(
+      /\blevel\s+(\d+)\s+or higher monster(?:\(s\)|s?) (?:you controlled|under your control) (?:was|were) sent (?:from (?:your|the) field )?to (?:(?:your|the) )?(?:gy|graveyard) this turn\b/i,
+  )
+  return match ? { minimumLevel: Number(match[1]) } : null
+}
+
+export function historicalPrerequisiteFailure(effectText, duelEvents) {
+  const requirement = historicalGraveyardRequirement(effectText)
+  if (!requirement) return ''
+  const satisfied = (duelEvents || []).some(event => event.type === 'sent-to-graveyard'
+      && event.wasControlled
+      && Number(event.card?.level) >= requirement.minimumLevel)
+  return satisfied
+    ? ''
+    : `A Level ${requirement.minimumLevel} or higher monster you controlled must have been sent to the GY this turn.`
 }
 
 const EFFECT_NUMBER_WORDS = {
@@ -78,10 +106,31 @@ export function isSpellTrapCard(card) {
   return /(?:spell|trap)/i.test(card?.type || '')
 }
 
+export function isFieldSpell(card) {
+  return isSpellTrapCard(card)
+      && (/(?:^|\s)field(?:\s|$)/i.test(card?.race || '')
+        || /field spell/i.test(card?.type || ''))
+}
+
+export function placeFieldSpell(zones, entry) {
+  const replaced = (zones.fieldZone || []).find(candidate => candidate.instanceId !== entry.instanceId)
+  zones.fieldZone = [entry]
+  if (replaced) {
+    zones.graveyard.push({
+      ...replaced,
+      moveReason: 'field-spell-replaced',
+      treatedAs: null,
+      overlayMaterials: [],
+    })
+  }
+  return replaced || null
+}
+
 export function spellTrapResolutionZone(card, entry, effectText) {
   const text = effectText || ''
   if (/\bbanish this card\b/i.test(text)) return 'banished'
   if (/\b(?:return|add) this card to (?:your|the) hand\b/i.test(text)) return 'hand'
+  if (isFieldSpell(card)) return 'fieldZone'
   if (/\bset this card\b/i.test(text)) return 'spellTrapZone'
 
   const staysFaceUp = /continuous/i.test(card?.race || '')
