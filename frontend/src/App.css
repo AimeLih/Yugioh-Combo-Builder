@@ -1535,6 +1535,13 @@ body { background: #060a12; }
   text-transform: uppercase;
 }
 
+.field-summon-restrictions {
+  margin: 0;
+  border-right: 0;
+  border-left: 0;
+  border-radius: 0;
+}
+
 .combo-option-label {
   display: inline-flex;
   align-items: center;
