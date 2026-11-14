@@ -380,6 +380,7 @@ public class ComboService {
                 eligibleCards = cardRepository.findAllByNameIn(new LinkedHashSet<>(candidateNames)).stream()
                         .filter(card -> !safeLower(cost).contains("other")
                                 || !card.getName().equalsIgnoreCase(source.getName()))
+                        .filter(card -> !isExcludedFromCost(card.getName(), cost))
                         .filter(card -> matchesGeneralCostRequirement(
                                 card.getName(), card.getType(), card.getArchetype(), card.getRace(), requirement))
                         .sorted(Comparator.comparing(Card::getName, String.CASE_INSENSITIVE_ORDER))
@@ -389,6 +390,7 @@ public class ComboService {
                 eligibleCards = cardRepository.findAllProjectedBy().stream()
                         .filter(card -> !safeLower(cost).contains("other")
                                 || !card.getName().equalsIgnoreCase(source.getName()))
+                        .filter(card -> !isExcludedFromCost(card.getName(), cost))
                         .filter(card -> matchesGeneralCostRequirement(
                                 card.getName(), card.getType(), card.getArchetype(), null, requirement))
                         .sorted(Comparator.comparing(
@@ -1331,6 +1333,15 @@ public class ComboService {
         String quoted = safeLower(quotedTerms.get(0));
         return safeLower(cardName).contains(quoted)
                 || safeLower(cardArchetype).contains(quoted);
+    }
+
+    private boolean isExcludedFromCost(String cardName, String cost) {
+        Matcher exclusions = Pattern.compile("except\\s+\"([^\"]+)\"", Pattern.CASE_INSENSITIVE)
+                .matcher(cost);
+        while (exclusions.find()) {
+            if (cardName.equalsIgnoreCase(exclusions.group(1))) return true;
+        }
+        return false;
     }
 
     private String generalCostSourceZone(String cost) {
