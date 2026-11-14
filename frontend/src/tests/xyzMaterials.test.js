@@ -5,6 +5,8 @@ import {
   attachXyzMaterials,
   canUseAsLevelXyzMaterial,
   detachXyzMaterials,
+  materialCombinations,
+  parseExtraDeckMaterialClause,
   prepareXyzMaterials,
   releaseXyzMaterials,
   xyzMaterialDetachCount,
@@ -19,6 +21,31 @@ const material = (instanceId, name, overlayMaterials = []) => ({
   card: { id: instanceId, name },
   overlayMaterials,
   treatedAs: 'Monster',
+})
+
+test('treats x+ Xyz wording as an x-material minimum', () => {
+  assert.deepEqual(parseExtraDeckMaterialClause('2+ Level 7 monsters'), {
+    minimum: 2,
+    repeatable: true,
+    descriptor: 'Level 7 monsters',
+  })
+  assert.deepEqual(parseExtraDeckMaterialClause('3 or more Level 4 monsters'), {
+    minimum: 3,
+    repeatable: true,
+    descriptor: 'Level 4 monsters',
+  })
+  assert.deepEqual(parseExtraDeckMaterialClause('2 Level 8 monsters'), {
+    minimum: 2,
+    repeatable: false,
+    descriptor: 'Level 8 monsters',
+  })
+})
+
+test('tries every minimum-size material set before sets with extra materials', () => {
+  const sets = materialCombinations(['a', 'b', 'c', 'd'], 2)
+  assert.equal(sets.slice(0, 6).every(set => set.length === 2), true)
+  assert.deepEqual(sets[0], ['a', 'b'])
+  assert.equal(sets[6].length, 3)
 })
 
 test('reads modern and legacy Xyz detach costs', () => {

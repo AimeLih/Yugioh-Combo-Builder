@@ -11,6 +11,34 @@ function materialCount(value) {
   return Number.isFinite(Number(normalized)) ? Number(normalized) : NUMBER_WORDS[normalized] || 0
 }
 
+export function parseExtraDeckMaterialClause(rawClause) {
+  const raw = String(rawClause || '')
+  const countMatch = raw.match(/^\s*(\d+)\s*(\+|or\s+more)?(?=\s)/i)
+  return {
+    minimum: countMatch ? Number(countMatch[1]) : 1,
+    repeatable: Boolean(countMatch?.[2]),
+    descriptor: countMatch ? raw.slice(countMatch[0].length).trim() : raw.trim(),
+  }
+}
+
+export function materialCombinations(items, minimum = 2, maximum = 5) {
+  const results = []
+  const limit = Math.min(maximum, items.length)
+  const visit = (start, chosen, targetSize) => {
+    if (chosen.length === targetSize) {
+      results.push([...chosen])
+      return
+    }
+    for (let index = start; index < items.length; index += 1) {
+      chosen.push(items[index])
+      visit(index + 1, chosen, targetSize)
+      chosen.pop()
+    }
+  }
+  for (let size = minimum; size <= limit; size += 1) visit(0, [], size)
+  return results
+}
+
 function withoutNestedMaterials(entry, moveReason) {
   return {
     ...entry,

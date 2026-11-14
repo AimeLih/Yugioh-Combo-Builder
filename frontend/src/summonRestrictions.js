@@ -12,6 +12,14 @@ function restrictionClause(sentence) {
   )?.[1]?.trim() || ''
 }
 
+function allowedException(sentence) {
+  const restrictionStart = sentence.search(/cannot special summon/i)
+  if (restrictionStart < 0) return ''
+  return sentence.slice(restrictionStart).match(
+      /\bexcept\s+(.+?)(?=,\s*(?:the turn|for the rest|during this turn|after this effect)|[.;]|$)/i,
+  )?.[1]?.trim() || ''
+}
+
 export function activationSummonRestrictions(card, selectedEffect) {
   const selectedSentences = normalizeEffectText(selectedEffect).split(/(?<=[.!?])\s+|\n+/)
   const activationWideSentences = normalizeEffectText(card.description)
@@ -23,14 +31,14 @@ export function activationSummonRestrictions(card, selectedEffect) {
       .filter(sentence => /cannot special summon/i.test(sentence))
       .map(sentence => {
         const clause = restrictionClause(sentence)
-        const allowedMatch = clause.match(/\bexcept\s+(.+)$/i)
+        const allowed = allowedException(sentence)
         return {
           id: `${card.id ?? card.name}:${sentence.toLowerCase()}`,
           sourceCard: card.name,
           text: sentence.trim(),
           scope: /from (?:your |the )?extra deck/i.test(clause) ? 'extraDeck' : 'all',
-          allowed: allowedMatch?.[1]?.trim() || '',
-          prohibited: allowedMatch ? '' : clause,
+          allowed,
+          prohibited: allowed ? '' : clause,
         }
       })
 }

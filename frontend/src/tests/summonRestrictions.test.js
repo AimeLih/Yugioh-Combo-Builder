@@ -39,6 +39,29 @@ test('extra deck exception continues to allow only the named monster type', () =
   assert.equal(restrictionAllowsCard(restriction, { name: 'Ash Blossom', type: 'Tuner Monster' }, false), true)
 })
 
+test('allows Riseheart Xyz summons when its exception follows the turn duration', () => {
+  const riseheart = {
+    id: 3,
+    name: 'Kashtira Riseheart',
+    type: 'Effect Monster',
+    description: 'If you control a "Kashtira" monster: You can Special Summon this card from your hand, also you cannot Special Summon monsters from the Extra Deck for the rest of this turn, except Xyz Monsters.',
+  }
+  const [restriction] = activationSummonRestrictions(riseheart, riseheart.description)
+
+  assert.equal(restriction.scope, 'extraDeck')
+  assert.equal(restriction.allowed, 'Xyz Monsters')
+  assert.equal(summonRestrictionReason(restriction ? [restriction] : [], {
+    name: 'Kashtira Shangri-Ira',
+    type: 'XYZ Monster',
+    level: 7,
+  }, true), null)
+  assert.match(summonRestrictionReason([restriction], {
+    name: 'Baronne de Fleur',
+    type: 'Synchro Monster',
+    level: 10,
+  }, true), /Kashtira Riseheart/)
+})
+
 test('quoted archetype wording remains a family match', () => {
   const restriction = {
     scope: 'all',
