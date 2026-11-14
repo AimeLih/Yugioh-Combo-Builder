@@ -2374,23 +2374,67 @@ body { background: #060a12; }
 }
 
 .effect-resolution-picker {
-  width: min(760px, calc(100vw - 2rem));
-  max-height: min(86vh, 860px);
+  width: min(820px, calc(100vw - 2rem));
+  max-height: min(88vh, 900px);
   overflow-y: auto;
+  border-color: rgba(75, 137, 148, 0.62);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 8% 0%, rgba(77, 151, 139, 0.13), transparent 34%),
+    radial-gradient(circle at 100% 18%, rgba(64, 112, 156, 0.12), transparent 36%),
+    linear-gradient(165deg, #0c1825 0%, #09131e 62%, #0b1621 100%);
+  box-shadow:
+    0 34px 100px rgba(0, 0, 0, 0.68),
+    0 0 0 1px rgba(155, 211, 202, 0.04) inset;
+  scrollbar-color: rgba(103, 158, 164, 0.55) transparent;
+}
+
+.effect-resolution-backdrop {
+  background: rgba(2, 7, 13, 0.76);
+  backdrop-filter: blur(8px) saturate(0.82);
+}
+
+.effect-resolution-picker .material-picker-header {
+  padding: 1.15rem 1.35rem;
+  border-bottom-color: rgba(99, 154, 160, 0.22);
+  background: linear-gradient(180deg, rgba(12, 27, 40, 0.97), rgba(10, 21, 33, 0.94));
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(12px);
+}
+
+.effect-resolution-picker .material-picker-kicker {
+  color: #75c5ae;
+  letter-spacing: 1.45px;
+}
+
+.effect-resolution-picker .material-picker-close {
+  border-color: rgba(112, 151, 174, 0.4);
+  border-radius: 9px;
+  background: rgba(17, 34, 49, 0.72);
+  color: #bfd0da;
+  transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.effect-resolution-picker .material-picker-close:hover {
+  border-color: rgba(117, 197, 174, 0.72);
+  background: rgba(32, 68, 69, 0.55);
+  color: #e6f4ef;
 }
 
 .effect-resolution-step {
   display: grid;
-  gap: 0.65rem;
-  padding: 0.9rem 1rem;
-  border-top: 1px solid rgba(130, 151, 170, 0.2);
+  gap: 0.8rem;
+  padding: 1.2rem 1.35rem 1.35rem;
+  border-top: 1px solid rgba(116, 151, 171, 0.13);
 }
 
 .effect-resolution-step h4 {
   margin: 0;
-  color: #e8bf3e;
+  color: #eee4d1;
   font-family: 'Cinzel', serif;
-  font-size: 0.95rem;
+  font-size: 0.92rem;
+  line-height: 1.35;
+  letter-spacing: 0.2px;
 }
 
 .effect-resolution-step .xyz-detach-copy {
@@ -2406,16 +2450,48 @@ body { background: #060a12; }
 }
 
 .effect-resolution-step .xyz-detach-copy {
-  color: #c7ac61;
+  color: #92aeb9;
   font-family: 'Rajdhani', sans-serif;
+  font-size: 0.84rem;
+  line-height: 1.5;
 }
 
 .effect-resolution-step .xyz-detach-option {
   width: 100%;
-  min-height: 82px;
-  color: #e8bf3e;
+  min-height: 96px;
+  color: #d9e5e8;
   font-family: 'Rajdhani', sans-serif;
   text-align: left;
+  border-color: rgba(70, 108, 132, 0.48);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(20, 43, 59, 0.78), rgba(11, 27, 41, 0.9));
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.12);
+  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.effect-resolution-step .xyz-detach-option:hover:not(:disabled),
+.effect-resolution-step .xyz-detach-option:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(105, 184, 164, 0.7);
+  outline: none;
+  background: linear-gradient(135deg, rgba(26, 57, 68, 0.9), rgba(14, 35, 49, 0.96));
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.2), 0 0 0 3px rgba(76, 157, 139, 0.08);
+}
+
+.effect-resolution-step .xyz-detach-option.selected {
+  border-color: rgba(107, 191, 165, 0.74);
+  background: linear-gradient(135deg, rgba(32, 91, 76, 0.28), rgba(13, 36, 49, 0.94));
+  box-shadow: 0 0 0 1px rgba(101, 190, 161, 0.1) inset, 0 10px 26px rgba(0, 0, 0, 0.18);
+}
+
+.effect-resolution-step .xyz-detach-option:disabled {
+  cursor: default;
+  opacity: 0.54;
+}
+
+.effect-resolution-step .xyz-detach-option.selected:disabled {
+  opacity: 0.82;
 }
 
 .effect-resolution-step .xyz-detach-option span {
@@ -2424,19 +2500,29 @@ body { background: #060a12; }
 }
 
 .effect-resolution-step .xyz-detach-option strong {
-  color: #f0d878;
+  color: #f1eadc;
   font-size: 1rem;
   line-height: 1.2;
 }
 
 .effect-resolution-step .xyz-detach-option small {
-  color: #c7ac61;
+  color: #9dafba;
   font-size: 0.82rem;
   line-height: 1.35;
 }
 
 .xyz-detach-option.effect-search-card-option {
-  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 0.9rem;
+  padding: 0.8rem;
+}
+
+.xyz-detach-option.effect-search-card-option img {
+  width: 54px;
+  height: 76px;
+  border: 1px solid rgba(231, 205, 142, 0.34);
+  border-radius: 5px;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.38);
 }
 
 .xyz-detach-option.effect-discard-card-option {
@@ -2449,14 +2535,72 @@ body { background: #060a12; }
 }
 
 .effect-resolution-step .effect-search-card-type {
-  color: #d6b84f;
+  color: #72bea9;
   font-weight: 600;
+  letter-spacing: 0.3px;
 }
 
 .effect-resolution-step .effect-search-card-description {
-  color: #e8cf78;
-  line-height: 1.45;
+  display: -webkit-box;
+  overflow: hidden;
+  color: #a9bac3;
+  line-height: 1.5;
   white-space: pre-line;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.effect-search-card-heading {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.effect-search-copy-count {
+  flex: 0 0 auto;
+  padding: 0.18rem 0.45rem;
+  border: 1px solid rgba(105, 190, 164, 0.46);
+  border-radius: 999px;
+  background: rgba(52, 119, 99, 0.2);
+  color: #9cdbc8 !important;
+  font-size: 0.65rem !important;
+  font-weight: 700;
+  letter-spacing: 0.35px;
+  text-transform: uppercase;
+}
+
+.effect-resolution-picker .selected-materials button {
+  border-color: rgba(99, 177, 154, 0.48);
+  border-radius: 999px;
+  background: rgba(38, 91, 79, 0.3);
+  color: #afe0d1;
+}
+
+.effect-resolution-picker .xyz-detach-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding: 1rem 1.35rem;
+  border-top-color: rgba(94, 143, 155, 0.24);
+  background: linear-gradient(180deg, rgba(10, 22, 34, 0.94), rgba(9, 19, 30, 0.98));
+  color: #94aeb8;
+  backdrop-filter: blur(12px);
+}
+
+.effect-resolution-picker .xyz-detach-footer button {
+  border-color: rgba(102, 191, 163, 0.7);
+  border-radius: 9px;
+  background: linear-gradient(135deg, #285f53, #3c8170);
+  color: #effbf7;
+  box-shadow: 0 8px 20px rgba(21, 78, 65, 0.25);
+  transition: transform 0.16s ease, filter 0.16s ease, box-shadow 0.16s ease;
+}
+
+.effect-resolution-picker .xyz-detach-footer button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+  box-shadow: 0 10px 24px rgba(24, 94, 76, 0.34);
 }
 
 .effect-discard-card-option input[type='checkbox'] {
