@@ -579,6 +579,41 @@ class YugiohServiceTest {
     }
 
     @Test
+    void deckCostUsesTheFullCatalogAndHonorsPrintedExclusions() {
+        String effect = "You can banish 1 \"Kashtira\" card from your Deck, except \"Kashtira Riseheart\"; "
+                + "banish the top 3 cards of your opponent's Deck face-down, and if you banish any, "
+                + "this card's Level becomes 7.";
+        Card riseheart = card(1, "Kashtira Riseheart", effect,
+                "Effect Monster", "Kashtira");
+        Card target = card(2, "Kashtira Fenrir", "A Kashtira monster.",
+                "Effect Monster", "Kashtira");
+        CardRepository.CostCardView riseheartView = mock(CardRepository.CostCardView.class);
+        CardRepository.CostCardView targetView = mock(CardRepository.CostCardView.class);
+
+        when(repository.getCardByName(riseheart.getName())).thenReturn(riseheart);
+        when(repository.getCardByName(target.getName())).thenReturn(target);
+        when(riseheartView.getId()).thenReturn(riseheart.getId());
+        when(riseheartView.getName()).thenReturn(riseheart.getName());
+        when(riseheartView.getType()).thenReturn(riseheart.getType());
+        when(riseheartView.getArchetype()).thenReturn(riseheart.getArchetype());
+        when(targetView.getId()).thenReturn(target.getId());
+        when(targetView.getName()).thenReturn(target.getName());
+        when(targetView.getType()).thenReturn(target.getType());
+        when(targetView.getArchetype()).thenReturn(target.getArchetype());
+        when(repository.findAllProjectedBy()).thenReturn(List.of(riseheartView, targetView));
+
+        ComboService.FusionMaterialPlan plan = service.getCardCostPlan(
+                riseheart.getName(), target.getName(), effect);
+
+        assertEquals("Deck", plan.availableFrom());
+        assertEquals("Banished", plan.destination());
+        assertEquals(List.of(target.getName()),
+                plan.slots().get(0).eligibleCards().stream()
+                        .map(ComboService.MaterialCardOption::name).toList());
+        verify(repository, never()).findAllByNameIn(org.mockito.ArgumentMatchers.anyCollection());
+    }
+
+    @Test
     void namedTokenSummonReturnsTheTokenInsteadOfArchetypeMonsters() {
         String effect = "You can discard 1 other \"Swordsoul\" card or 1 other Wyrm monster; "
                 + "Special Summon this card from your hand, then you can Special Summon 1 "
