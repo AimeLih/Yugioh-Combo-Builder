@@ -5,6 +5,7 @@ import { effectSourceZone } from './effectSourceZone.js'
 import {
   coinTossRequirement,
   effectSearchRequirement,
+  effectTargetRequirement,
   effectNeedsPrerequisiteCheck,
   genericDiscardRequirement,
   historicalPrerequisiteFailure,
@@ -122,6 +123,7 @@ const ZONE_BUTTON_LABELS = {
 }
 
 const CARD_RESULT_CLICK_COOLDOWN_MS = 700
+const COMBO_BUILDER_ENABLED = false
 
 function emptyZones() {
   return {
@@ -455,6 +457,38 @@ function displayZoneName(zone) {
     banished: 'Banished',
     extraDeck: 'Face-up Extra Deck',
   }[zone] || 'Current location'
+}
+
+function effectTargetDestinationZone(destination) {
+  const value = (destination || '').toLowerCase()
+  if (value.includes('xyz material')) return 'xyzMaterial'
+  if (value.includes('pendulum zone')) return 'pendulumZone'
+  if (value.includes('field zone')) return 'fieldZone'
+  if (value.includes('spell & trap zone')) return 'spellTrapZone'
+  if (value.includes('monster zone')) return 'monsterZone'
+  if (value.includes('graveyard') || value.includes('gy')) return 'graveyard'
+  if (value.includes('banish')) return 'banished'
+  if (value.includes('hand')) return 'hand'
+  return null
+}
+
+function effectTargetTreatedAs(destination) {
+  const value = (destination || '').toLowerCase()
+  if (value.includes('continuous trap')) return 'Continuous Trap'
+  if (value.includes('continuous spell')) return 'Continuous Spell'
+  if (value.includes('pendulum zone')) return 'Pendulum Card'
+  if (value.includes('field zone')) return 'Field Spell'
+  return null
+}
+
+function effectTargetCurrentZones(requirement) {
+  const zones = []
+  if (requirement.sources.includes('hand')) zones.push('hand')
+  if (requirement.sources.includes('graveyard')) zones.push('graveyard')
+  if (requirement.sources.includes('banished')) zones.push('banished')
+  if (requirement.sources.includes('extraDeck')) zones.push('extraDeck')
+  if (requirement.sources.includes('field')) zones.push(...MONSTER_FIELD_ZONES, 'spellTrapZone', 'fieldZone', 'pendulumZone')
+  return [...new Set(zones)]
 }
 
 function normalizeEffectText(text) {
@@ -1212,20 +1246,32 @@ function CoinTossPicker({ request, onConfirm, onCancel }) {
 
 function EffectResolutionPicker({ request, hand, onConfirm, onCancel }) {
   const [selectedSearchIds, setSelectedSearchIds] = useState([])
+  const [selectedTargetKeys, setSelectedTargetKeys] = useState([])
   const [discardChoices, setDiscardChoices] = useState([])
   useEffect(() => {
     setSelectedSearchIds([])
+    setSelectedTargetKeys([])
     setDiscardChoices([])
   }, [request?.effect.text])
   if (!request) return null
 
-  const { searchRequirement, discardRequirement, searchCandidates, sourceEntryId } = request
+  const {
+    searchRequirement,
+    targetRequirement,
+    discardRequirement,
+    searchCandidates,
+    targetOptions,
+    sourceEntryId,
+  } = request
   const selectedSearchCards = selectedSearchIds
       .map(id => searchCandidates.find(card => String(card.id) === String(id)))
       .filter(Boolean)
   const searchComplete = !searchRequirement
       || selectedSearchIds.length >= searchRequirement.min
         && selectedSearchIds.length <= searchRequirement.max
+  const targetComplete = !targetRequirement
+      || selectedTargetKeys.length >= targetRequirement.min
+        && selectedTargetKeys.length <= targetRequirement.max
   const handChoices = hand
       .filter(entry => entry.instanceId !== sourceEntryId)
       .map(entry => ({
@@ -1249,7 +1295,7 @@ function EffectResolutionPicker({ request, hand, onConfirm, onCancel }) {
     : []
   const allDiscardChoices = [...handChoices, ...searchedChoices, ...randomChoices]
   const discardComplete = !discardRequirement || discardChoices.length === discardRequirement.count
-  const complete = searchComplete && discardComplete
+  const complete = searchComplete && targetComplete && discardComplete
 
   function addSearchCard(card) {
     setSelectedSearchIds(current => current.length >= searchRequirement.max
@@ -1261,6 +1307,16 @@ function EffectResolutionPicker({ request, hand, onConfirm, onCancel }) {
   function removeSearchCard(index) {
     setSelectedSearchIds(current => current.filter((_, currentIndex) => currentIndex !== index))
     setDiscardChoices([])
+  }
+
+  function addTarget(option) {
+    setSelectedTargetKeys(current => current.length >= targetRequirement.max
+      ? current
+      : [...current, option.selectionKey])
+  }
+
+  function removeTarget(index) {
+    setSelectedTargetKeys(current => current.filter((_, currentIndex) => currentIndex !== index))
   }
 
   function toggleDiscard(key) {
@@ -1320,9 +1376,50 @@ function EffectResolutionPicker({ request, hand, onConfirm, onCancel }) {
             </section>
           )}
 
+          {targetRequirement && (
+            <section className="effect-resolution-step">
+              <h4>{searchRequirement ? '2' : '1'}. Choose {targetRequirement.min === targetRequirement.max ? targetRequirement.max : `up to ${targetRequirement.max}`} effect target{targetRequirement.max === 1 ? '' : 's'}</h4>
+              <p className="xyz-detach-copy">Choose the card and its printed source location. This selection resolves independently from Build Combo.</p>
+              <div className="selected-materials">
+                {selectedTargetKeys.map((key, index) => {
+                  const option = targetOptions.find(candidate => candidate.selectionKey === key)
+                  return option ? (
+                    <button key={`${key}-${index}`} type="button" onClick={() => removeTarget(index)}>
+                      {option.card.name} ({option.originLabel}) ×
+                    </button>
+                  ) : null
+                })}
+              </div>
+              <div className="xyz-detach-options">
+                {targetOptions.map(option => {
+                  const selectedCount = selectedTargetKeys.filter(key => key === option.selectionKey).length
+                  return (
+                    <button
+                        key={option.selectionKey}
+                        type="button"
+                        className={`xyz-detach-option effect-search-card-option${selectedCount ? ' selected' : ''}`}
+                        disabled={selectedTargetKeys.length >= targetRequirement.max}
+                        onClick={() => addTarget(option)}
+                    >
+                      {option.card.cardImageUrl && <img src={option.card.cardImageUrl} alt="" loading="lazy" decoding="async" />}
+                      <span>
+                        <span className="effect-search-card-heading">
+                          <strong>{option.card.name}</strong>
+                          {selectedCount > 0 && <small className="effect-search-copy-count">Selected ×{selectedCount}</small>}
+                        </span>
+                        <small className="effect-search-card-type">From {option.originLabel} → {option.destination}</small>
+                        <small className="effect-search-card-description">{option.reason || option.card.description || 'Legal effect target'}</small>
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </section>
+          )}
+
           {discardRequirement && (
             <section className="effect-resolution-step">
-              <h4>{searchRequirement ? '2' : '1'}. Discard {discardRequirement.count} card{discardRequirement.count === 1 ? '' : 's'}</h4>
+              <h4>{1 + Number(Boolean(searchRequirement)) + Number(Boolean(targetRequirement))}. Discard {discardRequirement.count} card{discardRequirement.count === 1 ? '' : 's'}</h4>
               <p className="xyz-detach-copy">
                 Choose an eligible card, or use the random non-Effect Monster fallback.
                 {discardRequirement.phase === 'resolution' && searchRequirement ? ' A card added above may be discarded.' : ''}
@@ -1350,11 +1447,11 @@ function EffectResolutionPicker({ request, hand, onConfirm, onCancel }) {
           )}
 
           <div className="xyz-detach-footer">
-            <span>{selectedSearchIds.length} searched · {discardChoices.length} discarded</span>
+            <span>{selectedSearchIds.length} searched · {selectedTargetKeys.length} targeted · {discardChoices.length} discarded</span>
             <button
                 type="button"
                 disabled={!complete}
-                onClick={() => onConfirm({ selectedSearchIds, discardChoices })}
+                onClick={() => onConfirm({ selectedSearchIds, selectedTargetKeys, discardChoices })}
             >
               Resolve Effect
             </button>
@@ -2253,6 +2350,15 @@ function CardDetail({
                 onStopPreview={onStopPreviewXyzMaterial}
             />
 
+            {summonRestrictions.length > 0 && (
+                <div className="active-summon-restrictions field-summon-restrictions" role="status">
+                  <strong>Active summon restriction</strong>
+                  {summonRestrictions.map(restriction => (
+                      <span key={restriction.id}>{restriction.sourceCard}: {restriction.text}</span>
+                  ))}
+                </div>
+            )}
+
           <section className="combo-workspace-panel" aria-label="Build Combo">
           <div className="wiki-section-header combo-workspace-heading" style={{ background: `${color}e6` }}>
             {materialPreview ? 'Attached Material Preview' : 'Build Combo'}
@@ -2283,6 +2389,8 @@ function CardDetail({
                 Back
               </button>
             </div>
+            {COMBO_BUILDER_ENABLED && (
+              <>
             <div className="effect-action-bar">
               {hasUnusedSelectedEffect ? (
                 <button
@@ -2315,15 +2423,6 @@ function CardDetail({
                   </div>
               )}
             </div>
-
-            {summonRestrictions.length > 0 && (
-                <div className="active-summon-restrictions" role="status">
-                  <strong>Active summon restriction</strong>
-                  {summonRestrictions.map(restriction => (
-                      <span key={restriction.id}>{restriction.sourceCard}: {restriction.text}</span>
-                  ))}
-                </div>
-            )}
 
             {comboLoading ? (
                 <div className="wiki-combo-loading">Loading next combo options...</div>
@@ -2385,12 +2484,14 @@ function CardDetail({
                   This effect resolves without a selectable follow-up card.
                 </div>
             )}
+              </>
+            )}
           </div>}
           </section>
           </aside>
         )}
 
-        {summonTargetPickerOpen && (
+        {COMBO_BUILDER_ENABLED && summonTargetPickerOpen && (
             <SummonTargetPicker
                 sourceCard={card}
                 options={summonTargetOptions}
@@ -2640,6 +2741,12 @@ export default function App() {
   }
 
   async function fetchComboOptions(card, zoneContext = null, effect = null) {
+    if (!COMBO_BUILDER_ENABLED) {
+      comboRequestId.current += 1
+      setComboLoading(false)
+      setComboOptions([])
+      return
+    }
     const requestId = ++comboRequestId.current
     setComboLoading(true)
     setComboOptions([])
@@ -3744,12 +3851,16 @@ export default function App() {
       effect,
       applyOptional,
       entry,
+      sourceCard,
       detachedMaterialIds,
       coinTossResolution,
   ) {
     const searchRequirement = effectSearchRequirement(effect.text)
+    const targetRequirement = searchRequirement || hasOpenDeckCardCost(effect.text)
+      ? null
+      : effectTargetRequirement(effect.text)
     const discardRequirement = genericDiscardRequirement(effect.text)
-    if (!searchRequirement && !discardRequirement) return null
+    if (!searchRequirement && !targetRequirement && !discardRequirement) return null
 
     let searchCandidates = []
     if (searchRequirement) {
@@ -3770,6 +3881,54 @@ export default function App() {
       }
     }
 
+    let targetOptions = []
+    if (targetRequirement) {
+      const response = await fetch(
+          `${API}/yugioh/card/combos?name=${encodeURIComponent(sourceCard.name)}&effect=${encodeURIComponent(effect.text)}`,
+      )
+      if (!response.ok) throw new Error('Could not load legal targets for this effect.')
+      const excludedNames = new Set(targetRequirement.excludedNames.map(name => name.toLowerCase()))
+      const currentSourceZones = effectTargetCurrentZones(targetRequirement)
+      const options = await response.json()
+      targetOptions = (Array.isArray(options) ? options : []).flatMap(option => {
+          if (excludedNames.has((option.card?.name || '').toLowerCase())) return []
+          const currentEntries = currentSourceZones.flatMap(zoneName =>
+            zones[zoneName]
+                .filter(candidate => candidate.instanceId !== entry?.instanceId)
+                .filter(candidate => candidate.card.id === option.card.id
+                  || candidate.card.name === option.card.name)
+                .map(candidate => ({ zoneName, candidate })))
+          const located = currentEntries.map(({ zoneName, candidate }) => ({
+            ...option,
+            originZone: zoneName,
+            originEntryId: candidate.instanceId,
+            originLabel: displayZoneName(zoneName),
+            selectionKey: `${option.card.id ?? option.card.name}:${option.destination}:${zoneName}:${candidate.instanceId}`,
+          }))
+          const virtual = []
+          if (targetRequirement.sources.includes('deck')) {
+            virtual.push({
+              ...option,
+              originZone: 'deck',
+              originEntryId: null,
+              originLabel: 'Deck',
+              selectionKey: `${option.card.id ?? option.card.name}:${option.destination}:deck`,
+            })
+          }
+          if (targetRequirement.sources.includes('extraDeck')) {
+            virtual.push({
+              ...option,
+              originZone: 'extraDeckSource',
+              originEntryId: null,
+              originLabel: 'Extra Deck',
+              selectionKey: `${option.card.id ?? option.card.name}:${option.destination}:extraDeck`,
+            })
+          }
+          return [...located, ...virtual]
+      })
+      if (targetOptions.length === 0) throw new Error('No legal cards are currently available for this effect.')
+    }
+
     return {
       effect,
       applyOptional,
@@ -3777,8 +3936,10 @@ export default function App() {
       coinTossResolution,
       sourceEntryId: entry?.instanceId ?? null,
       searchRequirement,
+      targetRequirement,
       discardRequirement,
       searchCandidates,
+      targetOptions,
     }
   }
 
@@ -3799,6 +3960,20 @@ export default function App() {
         .map(id => request.searchCandidates.find(card => String(card.id) === String(id)))
         .filter(Boolean)
     const discardChoices = new Set(selection.discardChoices || [])
+    const selectedTargetOptions = (selection.selectedTargetKeys || [])
+        .map(key => request.targetOptions.find(option => option.selectionKey === key))
+        .filter(Boolean)
+    const preparedTargetEntries = selectedTargetOptions.map(option => {
+      const currentEntry = option.originEntryId && ZONE_KEYS.includes(option.originZone)
+        ? zones[option.originZone].find(candidate => candidate.instanceId === option.originEntryId)
+        : null
+      return {
+        ...(currentEntry ?? zoneEntry(option.card, 'effect-target')),
+        moveReason: 'effect-resolution',
+        treatedAs: effectTargetTreatedAs(option.destination),
+        overlayMaterials: [],
+      }
+    })
 
     setZones(prev => {
       const next = Object.fromEntries(ZONE_KEYS.map(zoneName => [zoneName, [...prev[zoneName]]]))
@@ -3839,8 +4014,38 @@ export default function App() {
           description: 'Generic non-Effect Monster used as discard filler.',
         }, 'discard'))
       }
+
+      selectedTargetOptions.forEach((option, optionIndex) => {
+        if (option.originEntryId && ZONE_KEYS.includes(option.originZone)) {
+          const originIndex = next[option.originZone]
+              .findIndex(candidate => candidate.instanceId === option.originEntryId)
+          if (originIndex >= 0) next[option.originZone].splice(originIndex, 1)
+        }
+        const targetEntry = preparedTargetEntries[optionIndex]
+        const destinationZone = effectTargetDestinationZone(option.destination)
+        if (destinationZone === 'xyzMaterial') {
+          const host = MONSTER_FIELD_ZONES.flatMap(zoneName => next[zoneName])
+              .find(candidate => candidate.instanceId === request.sourceEntryId
+                && extraDeckKind(candidate.card) === 'Xyz')
+          if (host) {
+            const attached = attachXyzMaterials(host, [targetEntry])
+            for (const fieldZone of MONSTER_FIELD_ZONES) {
+              next[fieldZone] = next[fieldZone].map(candidate =>
+                candidate.instanceId === host.instanceId ? attached.entry : candidate)
+            }
+            next.graveyard.push(...attached.releasedMaterials.filter(material => !isTokenCard(material.card)))
+          }
+        } else if (destinationZone === 'fieldZone') {
+          placeFieldSpell(next, assignZoneSlot(next, destinationZone, targetEntry))
+        } else if (destinationZone) {
+          next[destinationZone].push(assignZoneSlot(next, destinationZone, targetEntry))
+        }
+      })
       return next
     })
+    const summonedTargets = preparedTargetEntries.filter((_, index) =>
+      effectTargetDestinationZone(selectedTargetOptions[index].destination) === 'monsterZone')
+    if (summonedTargets.length > 0) promptSimultaneousSummonEffects(summonedTargets)
   }
 
   async function chooseEffect(
@@ -3958,6 +4163,7 @@ export default function App() {
             effect,
             applyOptional,
             entry,
+            card,
             detachedMaterialIds,
             coinTossResolution,
         )
@@ -3973,8 +4179,10 @@ export default function App() {
     if (effectResolution) {
       const { request, selection } = effectResolution
       const selectedSearchIds = selection.selectedSearchIds || []
+      const selectedTargetKeys = selection.selectedTargetKeys || []
       const discardChoices = selection.discardChoices || []
       const validSearchIds = new Set(request.searchCandidates.map(card => String(card.id)))
+      const validTargetKeys = new Set(request.targetOptions.map(option => option.selectionKey))
       const validHandIds = new Set(zones.hand
           .filter(handEntry => handEntry.instanceId !== request.sourceEntryId)
           .map(handEntry => handEntry.instanceId))
@@ -3982,6 +4190,10 @@ export default function App() {
           || selectedSearchIds.length >= request.searchRequirement.min
             && selectedSearchIds.length <= request.searchRequirement.max
             && selectedSearchIds.every(id => validSearchIds.has(String(id)))
+      const targetCountValid = !request.targetRequirement
+          || selectedTargetKeys.length >= request.targetRequirement.min
+            && selectedTargetKeys.length <= request.targetRequirement.max
+            && selectedTargetKeys.every(key => validTargetKeys.has(key))
       const discardCountValid = !request.discardRequirement
           || discardChoices.length === request.discardRequirement.count
             && discardChoices.every(choice => {
@@ -3991,8 +4203,22 @@ export default function App() {
               const index = Number(choice.slice('searched:'.length))
               return Number.isInteger(index) && index >= 0 && index < selectedSearchIds.length
             })
-      if (!searchCountValid || !discardCountValid || new Set(discardChoices).size !== discardChoices.length) {
-        setError('Choose the printed number of search and discard cards before resolving this effect.')
+      const chosenTargets = selectedTargetKeys
+          .map(key => request.targetOptions.find(option => option.selectionKey === key))
+          .filter(Boolean)
+      const targetDestinations = chosenTargets.map(option => effectTargetDestinationZone(option.destination))
+      const requiredSpellTrapSlots = targetDestinations.filter(zoneName => zoneName === 'spellTrapZone').length
+          + Number(placesSelfAsContinuousTrap)
+      const targetCapacityValid = requiredSpellTrapSlots <= openSpellTrapSlots(zones).length
+          && targetDestinations.filter(zoneName => zoneName === 'monsterZone').length <= openMainMonsterSlots(zones).length
+          && targetDestinations.filter(zoneName => zoneName === 'pendulumZone').length <= openPendulumSlots(zones).length
+      const targetOriginsValid = chosenTargets.every(option => !option.originEntryId
+          || ZONE_KEYS.includes(option.originZone)
+            && zones[option.originZone].some(entry => entry.instanceId === option.originEntryId))
+      if (!searchCountValid || !targetCountValid || !discardCountValid
+          || new Set(discardChoices).size !== discardChoices.length
+          || !targetCapacityValid || !targetOriginsValid) {
+        setError('Choose the printed number of legal cards and make sure their destination zones are open.')
         return
       }
     }
