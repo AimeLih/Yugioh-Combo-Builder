@@ -32,6 +32,8 @@ import {
   canUseAsLevelXyzMaterial,
   detachXyzMaterials,
   materialCardCategory,
+  materialCombinations,
+  parseExtraDeckMaterialClause,
   prepareXyzMaterials,
   releaseXyzMaterials,
   xyzAlternateMaterialDescriptor,
@@ -40,6 +42,14 @@ import {
   xyzTransfersExistingMaterials,
 } from './xyzMaterials.js'
 import AuthControls from './AuthControls.jsx'
+import { applySelfLevelChange, costUsesOnlyHand, hasOpenDeckCardCost } from './cardLevel.js'
+import {
+  SEARCH_CARD_DRAG_TYPE,
+  hasSearchCardDragType,
+  parseSearchCardDragPayload,
+  searchCardDropEffect,
+  searchCardDragPayload,
+} from './searchDrag.js'
 
 function typeColor(type) {
   if (!type) return '#1a3a5c'
@@ -291,14 +301,7 @@ function materialRequirement(card) {
 }
 
 function materialClauses(requirement) {
-  return requirement.split(/\s+\+\s+/).map(raw => {
-    const countMatch = raw.match(/^\s*(\d+)(\+|\s+or more)?\s*/i)
-    return {
-      minimum: countMatch ? Number(countMatch[1]) : 1,
-      repeatable: Boolean(countMatch?.[2]),
-      descriptor: raw.replace(/^\s*\d+(?:\+|\s+or more)?\s*/i, '').trim(),
-    }
-  })
+  return requirement.split(/\s+\+\s+/).map(parseExtraDeckMaterialClause)
 }
 
 const MATERIAL_RACES = [
@@ -349,21 +352,6 @@ function matchesMaterialDescriptor(entry, descriptor) {
     return false
   }
   return isMonsterCard(card)
-}
-
-function combinations(items, minimum = 2) {
-  const results = []
-  const visit = (start, chosen) => {
-    if (chosen.length >= minimum) results.push([...chosen])
-    if (chosen.length === Math.min(5, items.length)) return
-    for (let index = start; index < items.length; index += 1) {
-      chosen.push(items[index])
-      visit(index + 1, chosen)
-      chosen.pop()
-    }
-  }
-  visit(0, [])
-  return results
 }
 
 function satisfiesClauses(materials, clauses) {
@@ -419,10 +407,10 @@ function findLegalExtraDeckMaterials(target, fieldEntries) {
       if (alternate) return [alternate]
     }
   }
-  const minimumMaterials = kind === 'Link'
+  const minimumMaterials = kind === 'Link' || kind === 'Xyz'
     ? Math.max(1, clauses.reduce((sum, clause) => sum + clause.minimum, 0))
     : 2
-  const materialSets = combinations(candidates, minimumMaterials)
+  const materialSets = materialCombinations(candidates, minimumMaterials)
 
   for (const materials of materialSets) {
     if (kind === 'Synchro') {
@@ -769,6 +757,15 @@ function SimulatedZones({
     zone: null,
     external: true,
   } : null)
+
+  function searchCardFromDrop(event) {
+    if (activeDrag?.external) return activeDrag.entry.card
+    return parseSearchCardDragPayload(event.dataTransfer.getData(SEARCH_CARD_DRAG_TYPE))
+  }
+
+  function acceptsSearchCardDrop(event) {
+    return !activeDrag && hasSearchCardDragType(event.dataTransfer.types)
+  }
   const linkState = calculateLinkState(zones)
   const zoneDefinitions = [
     { key: 'monsterZone', label: 'Monsters' },
@@ -794,22 +791,28 @@ function SimulatedZones({
                 key={zone.key}
                 className={`sim-zone ${zone.key}${zoneCanDrop ? ' drag-can-drop' : ''}${dragTarget === `zone:${zone.key}` ? ' drag-over' : ''}`}
                 onDragOver={event => {
-                  if (!zoneCanDrop) return
+                  const fallbackSearchCardDrop = acceptsSearchCardDrop(event)
+                  if (!zoneCanDrop && !fallbackSearchCardDrop) return
                   event.preventDefault()
-                  event.dataTransfer.dropEffect = 'move'
+                  event.dataTransfer.dropEffect = searchCardDropEffect(
+                    activeDrag,
+                    fallbackSearchCardDrop,
+                  )
                   setDragTarget(`zone:${zone.key}`)
                 }}
                 onDragLeave={event => {
                   if (event.currentTarget === event.target) setDragTarget(null)
                 }}
                 onDrop={event => {
-                  if (!zoneCanDrop) return
+                  const droppedSearchCard = searchCardFromDrop(event)
+                  if (!zoneCanDrop && activeDrag) return
+                  if (!zoneCanDrop && !droppedSearchCard) return
                   event.preventDefault()
                   setDragTarget(null)
                   setDraggedCard(null)
-                  if (activeDrag.external) {
+                  if (droppedSearchCard) {
                     onClearExternalDrag()
-                    onPlaceSearchCard(activeDrag.entry.card, zone.key)
+                    onPlaceSearchCard(droppedSearchCard, zone.key)
                   } else {
                     onMoveCard(activeDrag.entry, activeDrag.zone, zone.key)
                   }
@@ -865,21 +868,27 @@ function SimulatedZones({
                             key={entry.instanceId}
                             className={`sim-zone-empty zone-slot layout-${entry.renderZone || zone.key} slot-${entry.slot}${entry.pendulumOccupied ? ' occupied-by-pendulum' : ''}${slotCanDrop ? ' drag-can-drop' : ''}${dragTarget === targetKey ? ' drag-over' : ''}`}
                             onDragOver={event => {
-                              if (!slotCanDrop) return
+                              const fallbackSearchCardDrop = acceptsSearchCardDrop(event)
+                              if (!slotCanDrop && !fallbackSearchCardDrop) return
                               event.preventDefault()
                               event.stopPropagation()
-                              event.dataTransfer.dropEffect = 'move'
+                              event.dataTransfer.dropEffect = searchCardDropEffect(
+                                activeDrag,
+                                fallbackSearchCardDrop,
+                              )
                               setDragTarget(targetKey)
                             }}
                             onDrop={event => {
-                              if (!slotCanDrop) return
+                              const droppedSearchCard = searchCardFromDrop(event)
+                              if (!slotCanDrop && activeDrag) return
+                              if (!slotCanDrop && !droppedSearchCard) return
                               event.preventDefault()
                               event.stopPropagation()
                               setDragTarget(null)
                               setDraggedCard(null)
-                              if (activeDrag.external) {
+                              if (droppedSearchCard) {
                                 onClearExternalDrag()
-                                onPlaceSearchCard(activeDrag.entry.card, dropZone, entry.slot)
+                                onPlaceSearchCard(droppedSearchCard, dropZone, entry.slot)
                               } else {
                                 onMoveCard(activeDrag.entry, activeDrag.zone, dropZone, entry.slot)
                               }
@@ -1261,7 +1270,7 @@ function EffectResolutionPicker({ request, hand, onConfirm, onCancel }) {
   }
 
   return (
-      <div className="material-picker-backdrop" role="presentation">
+      <div className="material-picker-backdrop effect-resolution-backdrop" role="presentation">
         <section className="xyz-detach-picker effect-resolution-picker" role="dialog" aria-modal="true" aria-labelledby="effect-resolution-title">
           <div className="material-picker-header">
             <div>
@@ -1283,24 +1292,30 @@ function EffectResolutionPicker({ request, hand, onConfirm, onCancel }) {
                 ))}
               </div>
               <div className="xyz-detach-options">
-                {searchCandidates.map(card => (
+                {searchCandidates.map(card => {
+                  const selectedCount = selectedSearchIds.filter(id => String(id) === String(card.id)).length
+                  return (
                     <button
                         key={card.id}
                         type="button"
-                        className="xyz-detach-option effect-search-card-option"
+                        className={`xyz-detach-option effect-search-card-option${selectedCount ? ' selected' : ''}`}
                         disabled={selectedSearchIds.length >= searchRequirement.max}
                         onClick={() => addSearchCard(card)}
                     >
                       {card.cardImageUrl && <img src={card.cardImageUrl} alt="" loading="lazy" decoding="async" />}
                       <span>
-                        <strong>{card.name}</strong>
+                        <span className="effect-search-card-heading">
+                          <strong>{card.name}</strong>
+                          {selectedCount > 0 && <small className="effect-search-copy-count">Selected ×{selectedCount}</small>}
+                        </span>
                         <small className="effect-search-card-type">{card.type}</small>
                         <small className="effect-search-card-description">
                           {card.description || 'No card description available.'}
                         </small>
                       </span>
                     </button>
-                ))}
+                  )
+                })}
               </div>
             </section>
           )}
@@ -1744,7 +1759,9 @@ function MaterialPicker({
                     const filteredCards = slot.eligibleCards.filter(card =>
                       card.name.toLowerCase().includes(search.toLowerCase())
                         && availableCopies(card) > 0)
-                    const resultLimit = search.trim() && isTributePlan ? 50 : 10
+                    const resultLimit = hasOpenCardPool
+                      ? filteredCards.length
+                      : search.trim() && isTributePlan ? 50 : 10
                     const matchingCards = filteredCards.slice(0, resultLimit)
                     const hiddenResultCount = filteredCards.length - matchingCards.length
                     return (
@@ -2401,6 +2418,7 @@ function CardListItem({ card, selected, loading, onClick, dragEnabled, onDragSta
             if (!dragEnabled || loading) return
             event.dataTransfer.effectAllowed = 'copy'
             event.dataTransfer.setData('text/plain', `search-card:${card.id}`)
+            event.dataTransfer.setData(SEARCH_CARD_DRAG_TYPE, searchCardDragPayload(card))
             onDragStart(card)
           }}
           onDragEnd={onDragEnd}
@@ -2584,9 +2602,7 @@ export default function App() {
   const tuner = tunerLabel(displayedCard)
   const bothCardPanelsClosed = !displayedCard
       || (!cardPanelVisibility.detailsOpen && !cardPanelVisibility.zonesOpen)
-  const fieldFullyOpen = Boolean(displayedCard
-      && !cardPanelVisibility.detailsOpen
-      && cardPanelVisibility.zonesOpen)
+  const searchDragEnabled = Boolean(displayedCard && cardPanelVisibility.zonesOpen)
 
   function zoneEntry(card, moveReason = 'placed', treatedAs = null) {
     return { instanceId: `zone-${++zoneInstanceId.current}`, card, moveReason, treatedAs }
@@ -3293,6 +3309,7 @@ export default function App() {
       paymentReason = 'send',
   ) {
     const card = option.card
+    const costOnly = Boolean(option.costOnly)
     const destination = (option.destination || '').toLowerCase()
     const attachesAsXyzMaterial = destination.includes('xyz material')
     const destinationZone = destination.includes('pendulum zone')
@@ -3341,6 +3358,12 @@ export default function App() {
       return
     }
     const effectText = (activeEffect?.text || '').toLowerCase()
+    const changedSourceCard = selectedEntry
+      ? applySelfLevelChange(selectedEntry.card, activeEffect?.text)
+      : null
+    const changedSourceEntry = changedSourceCard && changedSourceCard !== selectedEntry.card
+      ? { ...selectedEntry, card: changedSourceCard }
+      : selectedEntry
     const movesSourceToBackrow = Boolean(selectedEntry
         && effectText.includes('place this card')
         && /continuous (?:trap|spell)/.test(effectText)
@@ -3424,6 +3447,13 @@ export default function App() {
         }
       }
 
+      if (changedSourceEntry && changedSourceEntry !== selectedEntry) {
+        for (const fieldZone of MONSTER_FIELD_ZONES) {
+          next[fieldZone] = next[fieldZone].map(entry =>
+            entry.instanceId === changedSourceEntry.instanceId ? changedSourceEntry : entry)
+        }
+      }
+
       if (selectedEntry
           && effectText.includes('place this card')
           && /continuous (?:trap|spell)/.test(effectText)) {
@@ -3460,12 +3490,18 @@ export default function App() {
       }
       return next
     })
-    setSelected(attachesAsXyzMaterial ? xyzMaterialHost.card : card)
-    setSelectedEntry(attachesAsXyzMaterial ? updatedXyzHost : destinationEntry)
-    setComboPath(prev => [...prev, card])
+    setSelected(costOnly
+      ? (changedSourceEntry?.card ?? card)
+      : attachesAsXyzMaterial ? xyzMaterialHost.card : card)
+    setSelectedEntry(costOnly
+      ? changedSourceEntry
+      : attachesAsXyzMaterial ? updatedXyzHost : destinationEntry)
+    if (!costOnly) setComboPath(prev => [...prev, card])
     setComboOptions([])
     setActiveEffect(null)
-    setActiveZoneContext(attachesAsXyzMaterial ? activeZoneContext : destinationZone)
+    setActiveZoneContext(costOnly
+      ? activeZoneContext
+      : attachesAsXyzMaterial ? activeZoneContext : destinationZone)
     if (movesSourceToBackrow || paidMaterials.some(material =>
       zones.monsterZone.concat(zones.extraMonsterZone).some(entry =>
         entry.instanceId === xyzMaterialsEntryId && entry.card.id === material.id))) {
@@ -3473,6 +3509,37 @@ export default function App() {
     }
     if (destinationZone === 'monsterZone') {
       promptOnSummonEffects(card, destinationEntry)
+    }
+  }
+
+  async function openMaterialPayment(option, {
+    isPaidFusion = false,
+    effectText = activeEffect?.text,
+    sourceName = selected?.name,
+  } = {}) {
+    setPendingOption(option)
+    setMaterialPlan(null)
+    setMaterialSelections({})
+    setMaterialSearch('')
+    setMaterialError(null)
+    setMaterialLoading(true)
+    try {
+      const plannerPath = isPaidFusion ? 'fusion-materials' : 'cost-materials'
+      const effectQuery = effectText
+        ? `&effect=${encodeURIComponent(effectText)}`
+        : ''
+      const handQuery = !isPaidFusion && costUsesOnlyHand(option.cost)
+        ? `&handOnly=true${zones.hand.map(entry => `&hand=${encodeURIComponent(entry.card.name)}`).join('')}`
+        : ''
+      const response = await fetch(
+          `${API}/yugioh/card/${plannerPath}?source=${encodeURIComponent(sourceName)}&target=${encodeURIComponent(option.card.name)}${effectQuery}${handQuery}`,
+      )
+      if (!response.ok) throw new Error('Could not determine legal cards for this route cost.')
+      setMaterialPlan(await response.json())
+    } catch (requestError) {
+      setMaterialError(requestError.message)
+    } finally {
+      setMaterialLoading(false)
     }
   }
 
@@ -3488,39 +3555,24 @@ export default function App() {
       return
     }
 
-    setPendingOption(option)
-    setMaterialPlan(null)
-    setMaterialSelections({})
-    setMaterialSearch('')
-    setMaterialError(null)
-    setMaterialLoading(true)
-    try {
-      const plannerPath = isPaidFusion ? 'fusion-materials' : 'cost-materials'
-      const effectQuery = activeEffect?.text
-        ? `&effect=${encodeURIComponent(activeEffect.text)}`
-        : ''
-      const handQuery = !isPaidFusion
-        ? `&handOnly=true${zones.hand.map(entry => `&hand=${encodeURIComponent(entry.card.name)}`).join('')}`
-        : ''
-      const response = await fetch(
-          `${API}/yugioh/card/${plannerPath}?source=${encodeURIComponent(selected.name)}&target=${encodeURIComponent(option.card.name)}${effectQuery}${handQuery}`,
-      )
-      if (!response.ok) throw new Error('Could not determine legal cards for this route cost.')
-      setMaterialPlan(await response.json())
-    } catch (requestError) {
-      setMaterialError(requestError.message)
-    } finally {
-      setMaterialLoading(false)
-    }
+    await openMaterialPayment(option, { isPaidFusion })
   }
 
-  function closeMaterialPicker() {
+  function resetMaterialPicker() {
     setPendingOption(null)
     setMaterialPlan(null)
     setMaterialSelections({})
     setMaterialSearch('')
     setMaterialError(null)
     setMaterialLoading(false)
+  }
+
+  function closeMaterialPicker() {
+    if (pendingOption?.costOnly && pendingOption.effectUsage) {
+      setActivatedEffects(previous => previous.filter(key => key !== pendingOption.effectUsage))
+      setActiveEffect(null)
+    }
+    resetMaterialPicker()
   }
 
   function addMaterial(slotIndex, card) {
@@ -3586,7 +3638,7 @@ export default function App() {
             : action.includes('banish')
               ? 'banish'
               : 'send'
-    closeMaterialPicker()
+    resetMaterialPicker()
     finishComboChoice(option, materials, destination, paymentReason)
   }
 
@@ -4001,6 +4053,7 @@ export default function App() {
 
     let resolvedZone = zone
     let summonedEntry = null
+    const directDeckCost = hasOpenDeckCardCost(effect.text)
     const paysSelfTribute = Boolean(entry
         && ['monsterZone', 'extraMonsterZone'].includes(zone)
         && /\btribute this card\b/i.test(effect.text))
@@ -4090,6 +4143,23 @@ export default function App() {
       setSelectedEntry(resolvedEntry)
     }
 
+    if (entry
+        && !summonedEntry
+        && !directDeckCost
+        && ['monsterZone', 'extraMonsterZone'].includes(resolvedZone)) {
+      const changedCard = applySelfLevelChange(entry.card, effect.text)
+      if (changedCard !== entry.card) {
+        const changedEntry = { ...entry, card: changedCard }
+        setZones(prev => ({
+          ...prev,
+          [resolvedZone]: prev[resolvedZone].map(candidate =>
+            candidate.instanceId === changedEntry.instanceId ? changedEntry : candidate),
+        }))
+        setSelected(changedCard)
+        setSelectedEntry(changedEntry)
+      }
+    }
+
     if (effectResolution) {
       applyEffectResolutionSelection(effectResolution.request, effectResolution.selection)
       setEffectResolutionRequest(null)
@@ -4100,7 +4170,18 @@ export default function App() {
       promptOnSummonEffects(card, summonedEntry)
     }
     const apiZone = ['graveyard', 'banished'].includes(zone) ? zone : null
-    if (preparedResolution?.searchRequirement) {
+    if (directDeckCost) {
+      await openMaterialPayment({
+        card,
+        cost: effect.text.split(';', 1)[0],
+        costOnly: true,
+        destination: '',
+        effectUsage: effectUsageKey(entry, effect),
+      }, {
+        effectText: effect.text,
+        sourceName: card.name,
+      })
+    } else if (preparedResolution?.searchRequirement) {
       setComboOptions([])
     } else {
       await fetchComboOptions(card, apiZone, validatedEffect)
@@ -4383,7 +4464,7 @@ export default function App() {
                               selected={(pendingCardId ?? selected?.id) === c.id}
                               loading={detailLoading && pendingCardId === c.id}
                               onClick={() => openSearchResult(c)}
-                          dragEnabled={fieldFullyOpen}
+                          dragEnabled={searchDragEnabled}
                           onDragStart={setSearchDraggedCard}
                           onDragEnd={() => setSearchDraggedCard(null)}
                           />
@@ -4415,7 +4496,7 @@ export default function App() {
                           onOpenPendulumSummon={openPendulumSummonPicker}
                           onMoveCard={moveZoneCard}
                           onValidateMove={moveZoneCardReason}
-                          externalDraggedCard={fieldFullyOpen ? searchDraggedCard : null}
+                          externalDraggedCard={searchDragEnabled ? searchDraggedCard : null}
                           onValidateSearchPlacement={searchPlacementReason}
                           onPlaceSearchCard={placeDraggedSearchCard}
                           onClearExternalDrag={() => setSearchDraggedCard(null)}
