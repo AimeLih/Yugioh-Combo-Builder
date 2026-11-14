@@ -1679,61 +1679,31 @@ body { background: #060a12; }
 }
 
 .sim-zone {
+  --zone-border-gradient: linear-gradient(135deg, #556174, #28384b 48%, #3f4c60);
   min-width: 0;
   display: flex;
   flex-direction: column;
-  border: 1px solid #26384c;
+  border: 1px solid transparent;
   border-radius: 9px;
-  background: rgba(13, 26, 44, 0.78);
+  background:
+    linear-gradient(rgba(13, 26, 44, 0.92), rgba(10, 20, 33, 0.92)) padding-box,
+    var(--zone-border-gradient) border-box;
   overflow: hidden;
 }
 
-.sim-zone.drag-can-drop {
-  border-color: rgba(86, 170, 144, 0.72);
-}
-
 .sim-zone.drag-over {
-  background: linear-gradient(180deg, rgba(50, 139, 110, 0.2), rgba(13, 26, 44, 0.9));
+  background:
+    linear-gradient(180deg, rgba(27, 74, 61, 0.92), rgba(13, 26, 44, 0.96)) padding-box,
+    var(--zone-border-gradient) border-box;
   box-shadow: 0 0 0 2px rgba(86, 196, 157, 0.22) inset;
-}
-
-.sim-zone.graveyard {
-  border-color: #425066;
 }
 
 .sim-zone.fieldZone {
   align-self: start;
-  border-color: #557c52;
-  background: linear-gradient(135deg, rgba(48, 104, 68, 0.17), rgba(13, 26, 44, 0.78));
 }
 
-.sim-zone.monsterZone {
-  border-color: #35664f;
-  background: linear-gradient(180deg, rgba(35, 92, 65, 0.14), rgba(13, 26, 44, 0.78));
-}
-
-.sim-zone.extraMonsterZone {
-  border-color: #3f7390;
-  background: linear-gradient(180deg, rgba(43, 104, 139, 0.16), rgba(13, 26, 44, 0.78));
-}
-
-.sim-zone.spellTrapZone {
-  border-color: #5b4f86;
-  background: linear-gradient(180deg, rgba(78, 59, 125, 0.15), rgba(13, 26, 44, 0.78));
-}
-
-.sim-zone.pendulumZone {
-  border-color: #397d72;
-  background: linear-gradient(180deg, rgba(35, 119, 105, 0.16), rgba(13, 26, 44, 0.78));
-}
-
-.sim-zone.hand {
-  border-color: #806d3f;
-  background: linear-gradient(180deg, rgba(128, 99, 38, 0.13), rgba(13, 26, 44, 0.78));
-}
-
-.sim-zone.banished {
-  border-color: #60486e;
+.sim-zone.drag-can-drop {
+  --zone-border-gradient: linear-gradient(135deg, #63d5ae, #315f57 50%, #7ce5c2);
 }
 
 .sim-zone-heading {
