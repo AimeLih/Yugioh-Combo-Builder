@@ -2367,16 +2367,16 @@ body { background: #060a12; }
 }
 
 .effect-resolution-backdrop {
-  background: rgba(2, 7, 13, 0.76);
-  backdrop-filter: blur(8px) saturate(0.82);
+  background: rgba(2, 7, 13, 0.92);
+  backdrop-filter: none;
 }
 
 .effect-resolution-picker .material-picker-header {
   padding: 1.15rem 1.35rem;
   border-bottom-color: rgba(99, 154, 160, 0.22);
-  background: linear-gradient(180deg, rgba(12, 27, 40, 0.97), rgba(10, 21, 33, 0.94));
+  background: linear-gradient(180deg, #0c1b28, #0a1521);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.16);
-  backdrop-filter: blur(12px);
+  backdrop-filter: none;
 }
 
 .effect-resolution-picker .material-picker-kicker {
@@ -2492,6 +2492,8 @@ body { background: #060a12; }
   grid-template-columns: 54px minmax(0, 1fr);
   gap: 0.9rem;
   padding: 0.8rem;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 104px;
 }
 
 .xyz-detach-option.effect-search-card-option img {
@@ -2560,9 +2562,9 @@ body { background: #060a12; }
   z-index: 2;
   padding: 1rem 1.35rem;
   border-top-color: rgba(94, 143, 155, 0.24);
-  background: linear-gradient(180deg, rgba(10, 22, 34, 0.94), rgba(9, 19, 30, 0.98));
+  background: linear-gradient(180deg, #0a1622, #09131e);
   color: #94aeb8;
-  backdrop-filter: blur(12px);
+  backdrop-filter: none;
 }
 
 .effect-resolution-picker .xyz-detach-footer button {
