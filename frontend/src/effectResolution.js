@@ -70,6 +70,36 @@ export function effectSearchRequirement(effectText) {
   }
 }
 
+export function effectTargetRequirement(effectText) {
+  const text = effectText || ''
+  const match = text.match(
+      /\b(place|set|special summon|send|banish|attach|return|shuffle|add)\b[^.;]*?\b(up to\s+)?(\d+|a|an|one|two|three|four|five)\s+(?:"([^"]+)"\s+)?(cards?|monsters?|spells?|traps?)\s+from\s+(?:your|the)\s+(.+?)(?=,\s*(?:except|then|in|to)\b|\s+to\s+(?:your|the)\b|[;.]|$)/i,
+  )
+  if (!match) return null
+
+  const count = effectNumber(match[3])
+  const sourceText = match[6].toLowerCase()
+  const sources = []
+  if (/\bhand\b/.test(sourceText)) sources.push('hand')
+  if (/\bextra deck\b/.test(sourceText)) sources.push('extraDeck')
+  else if (/\bdeck\b/.test(sourceText)) sources.push('deck')
+  if (/\b(?:gy|graveyard)\b/.test(sourceText)) sources.push('graveyard')
+  if (/\bbanished\b/.test(sourceText)) sources.push('banished')
+  if (/\bfield\b/.test(sourceText)) sources.push('field')
+  if (sources.length === 0) return null
+
+  return {
+    action: match[1].toLowerCase(),
+    count,
+    min: match[2] ? 1 : count,
+    max: count,
+    family: match[4] || '',
+    kind: match[5].replace(/s$/i, '').toLowerCase(),
+    sources,
+    excludedNames: [...text.matchAll(/\bexcept\s+"([^"]+)"/gi)].map(exclusion => exclusion[1]),
+  }
+}
+
 export function isEffectSearchCandidate(card, requirement) {
   if (!card || !requirement) return false
   const type = (card.type || '').toLowerCase()

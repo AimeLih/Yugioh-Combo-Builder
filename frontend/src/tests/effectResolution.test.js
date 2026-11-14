@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   coinTossRequirement,
   effectSearchRequirement,
+  effectTargetRequirement,
   effectNeedsPrerequisiteCheck,
   genericDiscardRequirement,
   historicalGraveyardRequirement,
@@ -70,6 +71,31 @@ test('multi-card searches filter the requested family and exclude Extra Deck mon
   assert.equal(isEffectSearchCandidate({ name: 'Exosister Martha', archetype: 'Exosister', type: 'Effect Monster' }, requirement), true)
   assert.equal(isEffectSearchCandidate({ name: 'Exosister Mikailis', archetype: 'Exosister', type: 'Xyz Monster' }, requirement), false)
   assert.equal(isEffectSearchCandidate({ name: 'Unrelated Monster', archetype: 'Other', type: 'Effect Monster' }, requirement), false)
+})
+
+test('direct effect targets are parsed independently from combo recommendations', () => {
+  const trudeaEffect = 'During your Main Phase: You can place this card you control and 1 "Centur-Ion" monster from your hand or Deck, except "Centur-Ion Trudea", in your Spell & Trap Zones as face-up Continuous Traps.'
+  assert.deepEqual(effectTargetRequirement(trudeaEffect), {
+    action: 'place',
+    count: 1,
+    min: 1,
+    max: 1,
+    family: 'Centur-Ion',
+    kind: 'monster',
+    sources: ['hand', 'deck'],
+    excludedNames: ['Centur-Ion Trudea'],
+  })
+})
+
+test('self-only movement does not create a second-card target request', () => {
+  assert.equal(effectTargetRequirement('During the Main Phase: You can Special Summon this card.'), null)
+})
+
+test('direct effect targets preserve comma-separated source zones', () => {
+  const requirement = effectTargetRequirement(
+      'Special Summon 1 "Example" monster from your hand, Deck, or GY to your field.',
+  )
+  assert.deepEqual(requirement.sources, ['hand', 'deck', 'graveyard'])
 })
 
 test('a hand effect that says Special Summon this card moves its source, not another monster', () => {
