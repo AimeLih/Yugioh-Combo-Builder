@@ -1,5 +1,6 @@
 package com.aimestart.yugiohsearch;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -19,10 +20,20 @@ public class YugiohController {
 
     private final CardCatalogService cardCatalogService;
     private final ComboService comboService;
+    private final EffectPrerequisiteService effectPrerequisiteService;
+    private final MaterialPlanningService materialPlanningService;
 
-    public YugiohController(CardCatalogService cardCatalogService, ComboService comboService) {
+    @Autowired
+    public YugiohController(
+            CardCatalogService cardCatalogService,
+            ComboService comboService,
+            EffectPrerequisiteService effectPrerequisiteService,
+            MaterialPlanningService materialPlanningService
+    ) {
         this.cardCatalogService = cardCatalogService;
         this.comboService = comboService;
+        this.effectPrerequisiteService = effectPrerequisiteService;
+        this.materialPlanningService = materialPlanningService;
     }
 
     @GetMapping("/card")
@@ -43,7 +54,7 @@ public class YugiohController {
     public ComboService.EffectPrerequisiteResult checkEffectPrerequisites(
             @RequestBody ComboService.EffectPrerequisiteRequest request
     ) {
-        return comboService.checkEffectPrerequisites(request);
+        return effectPrerequisiteService.checkEffectPrerequisites(request);
     }
 
     @GetMapping("/card/fusion-materials")
@@ -52,7 +63,7 @@ public class YugiohController {
             @RequestParam String target,
             @RequestParam(required = false) String effect
     ) {
-        return comboService.getFusionMaterialPlan(source, target, effect);
+        return materialPlanningService.getFusionMaterialPlan(source, target, effect);
     }
 
     @GetMapping("/card/cost-materials")
@@ -63,7 +74,7 @@ public class YugiohController {
             @RequestParam(defaultValue = "false") boolean handOnly,
             @RequestParam(required = false) List<String> hand
     ) {
-        return comboService.getCardCostPlan(
+        return materialPlanningService.getCardCostPlan(
                 source,
                 target,
                 effect,
