@@ -20,7 +20,13 @@ class YugiohControllerTest {
 
     private final CardCatalogService cardCatalogService = mock(CardCatalogService.class);
     private final ComboService comboService = mock(ComboService.class);
-    private final YugiohController controller = new YugiohController(cardCatalogService, comboService);
+    private final EffectPrerequisiteService effectPrerequisiteService = mock(EffectPrerequisiteService.class);
+    private final MaterialPlanningService materialPlanningService = mock(MaterialPlanningService.class);
+    private final YugiohController controller = new YugiohController(
+            cardCatalogService,
+            comboService,
+            effectPrerequisiteService,
+            materialPlanningService);
 
     @BeforeEach
     void configureImportToken() {
@@ -31,7 +37,11 @@ class YugiohControllerTest {
     void importRejectsMissingToken() {
         assertUnauthorized(() -> controller.importNewCards(null));
 
-        verifyNoInteractions(cardCatalogService, comboService);
+        verifyNoInteractions(
+                cardCatalogService,
+                comboService,
+                effectPrerequisiteService,
+                materialPlanningService);
     }
 
     @Test
