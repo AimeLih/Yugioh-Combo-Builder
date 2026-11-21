@@ -16,6 +16,7 @@ public interface CardRepository extends JpaRepository<Card, Long> {
         String getName();
         String getType();
         String getArchetype();
+        String getRace();
     }
 
     interface CardSearchSummaryView {
@@ -46,13 +47,16 @@ public interface CardRepository extends JpaRepository<Card, Long> {
             join card.typeReference typeReference
             left join card.raceReference raceReference
             left join card.attributeReference attributeReference
-            left join card.archetypeReference archetypeReference
             where upper(card.name) like upper(concat('%', :name, '%'))
               and (:typeId is null or typeReference.id = :typeId)
               and (:raceId is null or raceReference.id = :raceId)
               and (:fieldSpell is null or :fieldSpell = false or lower(raceReference.name) = 'field')
               and (:attributeId is null or attributeReference.id = :attributeId)
-              and (:archetypeId is null or archetypeReference.id = :archetypeId)
+              and (:archetypeId is null or exists (
+                    select membership.id
+                    from card.archetypeReferences membership
+                    where membership.id = :archetypeId
+              ))
               and (:level is null or card.level = :level)
               and (
                 :tuner is null
@@ -75,10 +79,19 @@ public interface CardRepository extends JpaRepository<Card, Long> {
 
     @EntityGraph(value = "Card.details")
     @Query("""
-            select card from Card card
-            where upper(card.archetypeReference.name) like upper(concat('%', :archetype, '%'))
+            select distinct card from Card card
+            join card.archetypeReferences membership
+            where upper(membership.name) like upper(concat('%', :archetype, '%'))
             """)
     List<Card> findByArchetypeContainingIgnoreCase(@Param("archetype") String archetype);
+
+    @EntityGraph(value = "Card.details")
+    @Query("""
+            select distinct card from Card card
+            join card.archetypeReferences membership
+            where membership.name in :archetypes
+            """)
+    List<Card> findByArchetypesIn(@Param("archetypes") Collection<String> archetypes);
 
     @EntityGraph(value = "Card.details")
     @Query("""
@@ -104,11 +117,60 @@ public interface CardRepository extends JpaRepository<Card, Long> {
     @Query("""
             select card.id as id,
                    card.name as name,
-                   card.typeReference.name as type,
-                   card.archetypeReference.name as archetype
+                   typeReference.name as type,
+                   archetypeReference.name as archetype,
+                   raceReference.name as race
             from Card card
+            join card.typeReference typeReference
+            left join card.archetypeReference archetypeReference
+            left join card.raceReference raceReference
+            where (:cardType is null
+                    or lower(typeReference.name) like lower(concat('%', :cardType, '%')))
+              and (:race is null or lower(raceReference.name) = lower(:race))
             """)
-    List<CostCardView> findAllProjectedBy();
+    List<CostCardView> findCostCandidatesByTypeAndRace(
+            @Param("cardType") String cardType,
+            @Param("race") String race
+    );
+
+    @Query(value = """
+            with candidate_ids as (
+                select card.id
+                from cards card
+                where upper(card.name) like upper(concat('%', cast(:quotedTerm as text), '%'))
+
+                union
+
+                select card.id
+                from archetypes matched_archetype
+                join card_archetypes membership
+                    on membership.archetype_id = matched_archetype.id
+                join cards card on card.id = membership.card_id
+                where upper(matched_archetype.name)
+                    like upper(concat('%', cast(:quotedTerm as text), '%'))
+            )
+            select card.id as id,
+                   card.name as name,
+                   type_reference.name as type,
+                   archetype_reference.name as archetype,
+                   race_reference.name as race
+            from candidate_ids candidate
+            join cards card on card.id = candidate.id
+            join card_types type_reference on type_reference.id = card.type_id
+            left join archetypes archetype_reference
+                on archetype_reference.id = card.archetype_id
+            left join card_races race_reference on race_reference.id = card.race_id
+            where (cast(:cardType as text) is null
+                    or lower(type_reference.name)
+                        like lower(concat('%', cast(:cardType as text), '%')))
+              and (cast(:race as text) is null
+                    or lower(race_reference.name) = lower(cast(:race as text)))
+            """, nativeQuery = true)
+    List<CostCardView> findCostCandidatesByQuotedTerm(
+            @Param("cardType") String cardType,
+            @Param("race") String race,
+            @Param("quotedTerm") String quotedTerm
+    );
 
     @Query("select lower(card.name) from Card card")
     Set<String> findAllNormalizedNames();
