@@ -1059,6 +1059,42 @@ class YugiohServiceTest {
     }
 
     @Test
+    void cardSearchPassesTheSelectedArchetypeMembershipFilter() {
+        CardRepository.CardSearchSummaryView multiArchetypeCard = mock(CardRepository.CardSearchSummaryView.class);
+        when(multiArchetypeCard.getId()).thenReturn(2L);
+        when(multiArchetypeCard.getName()).thenReturn("Scareclaw Kashtira");
+        when(multiArchetypeCard.getType()).thenReturn("Effect Monster");
+        when(repository.findSearchSummariesByName(
+                org.mockito.ArgumentMatchers.eq(""),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.eq(27),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any(org.springframework.data.domain.Pageable.class)))
+                .thenReturn(List.of(multiArchetypeCard));
+
+        List<CardCatalogService.CardSearchSummary> results = cardCatalogService.getCardsBySubstring(
+                "", null, null, null, null, 27, null, null, 20);
+
+        assertEquals(List.of("Scareclaw Kashtira"), results.stream()
+                .map(CardCatalogService.CardSearchSummary::name)
+                .toList());
+        verify(repository).findSearchSummariesByName(
+                org.mockito.ArgumentMatchers.eq(""),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.eq(27),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any(org.springframework.data.domain.Pageable.class));
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void importsOnlyMissingCardsWithAllApplicableData() {
         Card existingCard = card(1, "Existing Card", "Original description", "Spell Card", "Existing");
