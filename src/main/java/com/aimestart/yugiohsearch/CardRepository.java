@@ -52,11 +52,15 @@ public interface CardRepository extends JpaRepository<Card, Long> {
               and (:raceId is null or raceReference.id = :raceId)
               and (:fieldSpell is null or :fieldSpell = false or lower(raceReference.name) = 'field')
               and (:attributeId is null or attributeReference.id = :attributeId)
-              and (:archetypeId is null or exists (
+              and (
+                :archetypeId is null
+                or card.archetypeReference.id = :archetypeId
+                or exists (
                     select membership.id
                     from card.archetypeReferences membership
                     where membership.id = :archetypeId
-              ))
+                )
+              )
               and (:level is null or card.level = :level)
               and (
                 :tuner is null
