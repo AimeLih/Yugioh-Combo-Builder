@@ -51,6 +51,7 @@ import {
   searchCardDropEffect,
   searchCardDragPayload,
 } from './searchDrag.js'
+import { normalSummonTributeCount, tributeSummonCandidates } from './tributeSummon.js'
 
 function typeColor(type) {
   if (!type) return '#1a3a5c'
@@ -158,6 +159,11 @@ function isExtraDeckMonster(card) {
 
 function isRitualMonster(card) {
   return isMonsterCard(card) && /ritual/i.test(card.type || '')
+}
+
+function persistentZoneEntry(entry) {
+  const { renderZone: _renderZone, tributeSourceZone: _tributeSourceZone, ...persistent } = entry
+  return persistent
 }
 
 function manualPlacementZones(card) {
@@ -763,6 +769,72 @@ function ZoneSlotPicker({ request, onChoose, onCancel }) {
   )
 }
 
+function TributeSummonPicker({ request, onConfirm, onCancel }) {
+  const [selectedIds, setSelectedIds] = useState([])
+
+  useEffect(() => {
+    setSelectedIds([])
+  }, [request])
+
+  if (!request) return null
+  const complete = selectedIds.length === request.required
+
+  function toggle(entry) {
+    setSelectedIds(current => current.includes(entry.instanceId)
+      ? current.filter(id => id !== entry.instanceId)
+      : current.length < request.required ? [...current, entry.instanceId] : current)
+  }
+
+  return (
+      <div className="material-picker-backdrop" role="presentation">
+        <section className="extra-deck-picker route-cost-picker" role="dialog" aria-modal="true" aria-labelledby="tribute-summon-title">
+          <div className="material-picker-header">
+            <div>
+              <div className="material-picker-kicker">Tribute Summon</div>
+              <h3 id="tribute-summon-title">{request.card.name}</h3>
+            </div>
+            <button type="button" className="material-picker-close" onClick={onCancel}>Close</button>
+          </div>
+          <div className="extra-deck-field-summary route-cost-summary">
+            <strong>Select {request.required} monster{request.required === 1 ? '' : 's'} you control</strong>
+            <span>Selected monsters are Tributed to the Graveyard before the Normal Summon.</span>
+          </div>
+          <div className="extra-deck-results route-cost-results">
+            {request.candidates.map(entry => {
+              const selected = selectedIds.includes(entry.instanceId)
+              return (
+                  <button
+                      key={entry.instanceId}
+                      type="button"
+                      className={`extra-deck-result route-cost-result${selected ? ' selected' : ' legal'}`}
+                      aria-pressed={selected}
+                      onClick={() => toggle(entry)}
+                  >
+                    <span className="extra-deck-result-heading">
+                      <strong>{entry.card.name}</strong>
+                      <span>{selected ? 'Selected' : 'Available'}</span>
+                    </span>
+                    <span className="extra-deck-requirement">{ZONE_LABELS[entry.tributeSourceZone]}</span>
+                  </button>
+              )
+            })}
+          </div>
+          <div className="material-picker-actions">
+            <button type="button" className="material-cancel-btn" onClick={onCancel}>Cancel</button>
+            <button
+                type="button"
+                className="material-confirm-btn"
+                disabled={!complete}
+                onClick={() => onConfirm(request.candidates.filter(entry => selectedIds.includes(entry.instanceId)))}
+            >
+              Tribute and Summon
+            </button>
+          </div>
+        </section>
+      </div>
+  )
+}
+
 function SimulatedZones({
   zones,
   activatedEffects,
@@ -933,7 +1005,9 @@ function SimulatedZones({
                         </div>
                     )
                   }
-                  const entryZone = entry.renderZone || zone.key
+                  const entryZone = ['monsterZone', 'spellTrapZone'].includes(zone.key)
+                    ? entry.renderZone || zone.key
+                    : zone.key
                   const effects = cardEffectOptions(entry.card, entryZone, entry)
                   const liveEffect = canActivateFromZone(entry, entryZone)
                   const used = effects.length > 0 && effects.every(effect =>
@@ -2608,6 +2682,7 @@ export default function App() {
   const [effectInteractionPending, setEffectInteractionPending] = useState(false)
   const [placementSelection, setPlacementSelection] = useState(null)
   const [zoneSlotRequest, setZoneSlotRequest] = useState(null)
+  const [tributeSummonRequest, setTributeSummonRequest] = useState(null)
   const summonEffectQueue = useRef([])
   const [pendingOption, setPendingOption] = useState(null)
   const [materialPlan, setMaterialPlan] = useState(null)
@@ -2884,30 +2959,83 @@ export default function App() {
     return true
   }
 
-  function searchPlacementReason(card, destination, preferredSlot = null) {
+  function zonesWithoutTributes(currentZones, tributeEntries = []) {
+    const tributeIds = new Set(tributeEntries.map(entry => entry.instanceId))
+    return Object.fromEntries(ZONE_KEYS.map(zoneName => [
+      zoneName,
+      currentZones[zoneName].filter(entry => !tributeIds.has(entry.instanceId)),
+    ]))
+  }
+
+  function applyTributes(next, tributeEntries) {
+    const tributeIds = new Set(tributeEntries.map(entry => entry.instanceId))
+    for (const fieldZone of MONSTER_FIELD_ZONES) {
+      const tributed = next[fieldZone].filter(entry => tributeIds.has(entry.instanceId))
+      next[fieldZone] = next[fieldZone].filter(entry => !tributeIds.has(entry.instanceId))
+      for (const entry of tributed) {
+        const released = releaseXyzMaterials(entry)
+        if (!isTokenCard(entry.card)) {
+          next.graveyard.push({ ...persistentZoneEntry(released.entry), moveReason: 'tribute-summon' })
+        }
+        next.graveyard.push(...released.releasedMaterials
+            .filter(material => !isTokenCard(material.card))
+            .map(persistentZoneEntry))
+      }
+    }
+  }
+
+  function requestTributeSummon(card, onConfirm) {
+    const required = normalSummonTributeCount(card)
+    if (required === 0) return false
+    const candidates = tributeSummonCandidates(zones)
+    if (candidates.length < required) {
+      setError(`${card.name} requires ${required} Tribute${required === 1 ? '' : 's'} to Normal Summon, but you only control ${candidates.length} monster${candidates.length === 1 ? '' : 's'}.`)
+      return true
+    }
+    setTributeSummonRequest({ card, required, candidates, onConfirm })
+    setError(null)
+    return true
+  }
+
+  function searchPlacementReason(card, destination, preferredSlot = null, currentZones = zones, tributesPaid = false) {
     if (!card || !ZONE_KEYS.includes(destination)) return 'Unknown card destination.'
     if (!manualPlacementZones(card).includes(destination)) {
       return `${card.name} cannot be placed in ${ZONE_LABELS[destination]}.`
     }
-    const capacityReason = placementCapacityReason(zones, destination, card)
+    const requiredTributes = destination === 'monsterZone' ? normalSummonTributeCount(card) : 0
+    const candidates = requiredTributes > 0 && !tributesPaid ? tributeSummonCandidates(currentZones) : []
+    if (!tributesPaid && requiredTributes > candidates.length) {
+      return `${card.name} requires ${requiredTributes} Tribute${requiredTributes === 1 ? '' : 's'} to Normal Summon.`
+    }
+    const capacityZones = requiredTributes > 0 && !tributesPaid
+      ? zonesWithoutTributes(currentZones, candidates.slice(0, requiredTributes))
+      : currentZones
+    const capacityReason = placementCapacityReason(capacityZones, destination, card)
     if (capacityReason) return capacityReason
     if (preferredSlot !== null) {
       let open = []
-      if (destination === 'monsterZone') open = openMainMonsterSlots(zones)
-      if (destination === 'extraMonsterZone') open = openExtraMonsterSlots(zones)
-      if (destination === 'spellTrapZone') open = openSpellTrapSlots(zones)
-      if (destination === 'pendulumZone') open = openPendulumSlots(zones)
+      if (destination === 'monsterZone') open = openMainMonsterSlots(capacityZones)
+      if (destination === 'extraMonsterZone') open = openExtraMonsterSlots(capacityZones)
+      if (destination === 'spellTrapZone') open = openSpellTrapSlots(capacityZones)
+      if (destination === 'pendulumZone') open = openPendulumSlots(capacityZones)
       if (open.length > 0 && !open.includes(preferredSlot)) return `${zoneSlotLabel(destination, preferredSlot)} is occupied.`
       if (destination === 'monsterZone' && extraDeckKind(card) === 'Link'
-          && !calculateLinkState(zones).pointedMainSlots.has(preferredSlot)) {
+          && !calculateLinkState(capacityZones).pointedMainSlots.has(preferredSlot)) {
         return 'A Link Monster from the Extra Deck requires an open linked Main Monster Zone.'
       }
     }
     return ''
   }
 
-  function placeCardFromSearch(card, destination, preferredSlot = null) {
-    const invalidReason = searchPlacementReason(card, destination, preferredSlot)
+  function placeCardFromSearch(card, destination, preferredSlot = null, tributeEntries = null) {
+    const requiredTributes = destination === 'monsterZone' ? normalSummonTributeCount(card) : 0
+    if (requiredTributes > 0 && tributeEntries === null) {
+      requestTributeSummon(card, selected => placeCardFromSearch(card, destination, preferredSlot, selected))
+      return
+    }
+    const selectedTributes = tributeEntries ?? []
+    const projectedZones = zonesWithoutTributes(zones, selectedTributes)
+    const invalidReason = searchPlacementReason(card, destination, preferredSlot, projectedZones, selectedTributes.length > 0)
     if (invalidReason) {
       setError(invalidReason)
       return
@@ -2915,14 +3043,14 @@ export default function App() {
 
     if (preferredSlot === null && ['monsterZone', 'extraMonsterZone'].includes(destination)) {
       const linkedSlots = destination === 'monsterZone' && extraDeckKind(card) === 'Link'
-        ? [...calculateLinkState(zones).pointedMainSlots]
+        ? [...calculateLinkState(projectedZones).pointedMainSlots]
         : null
-      const choices = zoneSlotChoices(zones, destination, linkedSlots)
+      const choices = zoneSlotChoices(projectedZones, destination, linkedSlots)
       requestZoneSlot(
           card.name,
           destination === 'monsterZone' ? 'Choose a Main Monster Zone' : 'Choose an Extra Monster Zone',
           choices,
-          choice => placeCardFromSearch(card, destination, choice.slot),
+          choice => placeCardFromSearch(card, destination, choice.slot, selectedTributes),
       )
       return
     }
@@ -2938,7 +3066,7 @@ export default function App() {
       banished: 'manually-banished',
       extraDeck: 'placed-in-extra-deck',
     }
-    const entry = assignZoneSlot(zones, destination, zoneEntry(
+    const entry = assignZoneSlot(projectedZones, destination, zoneEntry(
           card,
           moveReasons[destination],
           destination === 'pendulumZone'
@@ -2948,15 +3076,22 @@ export default function App() {
     setComboHistory(prev => [...prev, snapshotComboState()])
     setZones(previous => {
       const next = Object.fromEntries(ZONE_KEYS.map(zoneName => [zoneName, [...previous[zoneName]]]))
+      applyTributes(next, selectedTributes)
       if (destination === 'fieldZone') placeFieldSpell(next, entry)
       else next[destination].push(entry)
       return next
     })
+    if (selectedTributes.length > 0) {
+      rememberSentFromField(selectedTributes.map(tribute => tribute.card), 'tribute')
+      const tributeIds = new Set(selectedTributes.map(tribute => tribute.instanceId))
+      setActivatedEffects(previous => previous.filter(key => ![...tributeIds].some(id => key.startsWith(`${id}:`))))
+    }
     setSelected(card)
     setSelectedEntry(entry)
     setActiveZoneContext(destination)
     setPlacementSelection(null)
     setZoneSlotRequest(null)
+    setTributeSummonRequest(null)
     setError(null)
     if (destination === 'monsterZone' || destination === 'extraMonsterZone') {
       promptOnSummonEffects(card, entry, destination)
@@ -3001,6 +3136,7 @@ export default function App() {
     setXyzMaterialPreview(null)
     setPlacementSelection(null)
     setZoneSlotRequest(null)
+    setTributeSummonRequest(null)
     setSearchDraggedCard(null)
     summonEffectQueue.current = []
     setComboOptions([])
@@ -3059,14 +3195,17 @@ export default function App() {
     summonEffectQueue.current = triggered.slice(1)
   }
 
-  function zonesWithoutEntry(entry, fromZone) {
+  function zonesWithoutEntry(entry, fromZone, removedEntries = []) {
+    const removedIds = new Set(removedEntries.map(candidate => candidate.instanceId))
     return Object.fromEntries(ZONE_KEYS.map(zoneName => [
       zoneName,
-      zones[zoneName].filter(candidate => zoneName !== fromZone || candidate.instanceId !== entry.instanceId),
+      zones[zoneName].filter(candidate =>
+        !removedIds.has(candidate.instanceId)
+          && (zoneName !== fromZone || candidate.instanceId !== entry.instanceId)),
     ]))
   }
 
-  function moveZoneCardReason(entry, fromZone, toZone, preferredSlot = null) {
+  function moveZoneCardReason(entry, fromZone, toZone, preferredSlot = null, tributeEntries = []) {
     if (!entry || !ZONE_KEYS.includes(fromZone) || !ZONE_KEYS.includes(toZone)) return 'Unknown zone.'
     if (!zones[fromZone].some(candidate => candidate.instanceId === entry.instanceId)) return 'That card is no longer in its original zone.'
     if (!manualPlacementZones(entry.card).includes(toZone)) {
@@ -3082,7 +3221,18 @@ export default function App() {
       return `This card is already in ${zoneSlotLabel(toZone, preferredSlot)}.`
     }
 
-    const projectedZones = zonesWithoutEntry(entry, fromZone)
+    const requiredTributes = fromZone === 'hand' && toZone === 'monsterZone'
+      ? normalSummonTributeCount(entry.card)
+      : 0
+    const availableTributes = tributeSummonCandidates(zones)
+    if (requiredTributes > availableTributes.length) {
+      return `${entry.card.name} requires ${requiredTributes} Tribute${requiredTributes === 1 ? '' : 's'} to Normal Summon.`
+    }
+
+    const validationTributes = tributeEntries.length > 0
+      ? tributeEntries
+      : availableTributes.slice(0, requiredTributes)
+    const projectedZones = zonesWithoutEntry(entry, fromZone, validationTributes)
     if (toZone === 'monsterZone') {
       let open = openMainMonsterSlots(projectedZones)
       const requiresLinkedZone = fromZone === 'extraDeck'
@@ -3120,14 +3270,22 @@ export default function App() {
     return ''
   }
 
-  function moveZoneCard(entry, fromZone, toZone, preferredSlot = null) {
-    const invalidReason = moveZoneCardReason(entry, fromZone, toZone, preferredSlot)
+  function moveZoneCard(entry, fromZone, toZone, preferredSlot = null, tributeEntries = null) {
+    const requiredTributes = fromZone === 'hand' && toZone === 'monsterZone'
+      ? normalSummonTributeCount(entry.card)
+      : 0
+    if (requiredTributes > 0 && tributeEntries === null) {
+      requestTributeSummon(entry.card, selected => moveZoneCard(entry, fromZone, toZone, preferredSlot, selected))
+      return
+    }
+    const selectedTributes = tributeEntries ?? []
+    const invalidReason = moveZoneCardReason(entry, fromZone, toZone, preferredSlot, selectedTributes)
     if (invalidReason) {
       setError(invalidReason)
       return
     }
 
-    const projectedZones = zonesWithoutEntry(entry, fromZone)
+    const projectedZones = zonesWithoutEntry(entry, fromZone, selectedTributes)
     if (preferredSlot === null && ['monsterZone', 'extraMonsterZone'].includes(toZone)) {
       const linkedSlots = fromZone === 'extraDeck'
           && toZone === 'monsterZone'
@@ -3140,7 +3298,7 @@ export default function App() {
           entry.card.name,
           toZone === 'monsterZone' ? 'Choose a Main Monster Zone' : 'Choose an Extra Monster Zone',
           choices,
-          choice => moveZoneCard(entry, fromZone, toZone, choice.slot),
+          choice => moveZoneCard(entry, fromZone, toZone, choice.slot, selectedTributes),
       )
       return
     }
@@ -3148,7 +3306,7 @@ export default function App() {
     const leavesMonsterField = MONSTER_FIELD_ZONES.includes(fromZone) && !MONSTER_FIELD_ZONES.includes(toZone)
     const released = leavesMonsterField ? releaseXyzMaterials(entry) : { entry, releasedMaterials: [] }
     const movedEntry = assignZoneSlot(projectedZones, toZone, {
-      ...released.entry,
+      ...persistentZoneEntry(released.entry),
       moveReason: toZone === 'monsterZone'
         ? 'normal-summon'
         : toZone === 'pendulumZone'
@@ -3167,11 +3325,17 @@ export default function App() {
     setZones(prev => {
       const next = Object.fromEntries(ZONE_KEYS.map(zoneName => [zoneName, [...prev[zoneName]]]))
       next[fromZone] = next[fromZone].filter(candidate => candidate.instanceId !== entry.instanceId)
+      applyTributes(next, selectedTributes)
       if (toZone === 'fieldZone') placeFieldSpell(next, movedEntry)
       else next[toZone].push(movedEntry)
       next.graveyard.push(...released.releasedMaterials.filter(material => !isTokenCard(material.card)))
       return next
     })
+    if (selectedTributes.length > 0) {
+      rememberSentFromField(selectedTributes.map(tribute => tribute.card), 'tribute')
+      const tributeIds = new Set(selectedTributes.map(tribute => tribute.instanceId))
+      setActivatedEffects(previous => previous.filter(key => ![...tributeIds].some(id => key.startsWith(`${id}:`))))
+    }
     setSelected(entry.card)
     setSelectedEntry(movedEntry)
     setZoneSlotRequest(null)
@@ -4770,6 +4934,15 @@ export default function App() {
             onConfirm={confirmMaterialPayment}
             onCancel={closeMaterialPicker}
             zones={zones}
+        />
+        <TributeSummonPicker
+            request={tributeSummonRequest}
+            onConfirm={entries => {
+              const request = tributeSummonRequest
+              setTributeSummonRequest(null)
+              request?.onConfirm(entries)
+            }}
+            onCancel={() => setTributeSummonRequest(null)}
         />
         <EffectPicker
             selection={effectSelection}
