@@ -67,6 +67,7 @@ final class ComboEngine {
     private record EffectSection(String text, String sourceZone) {}
 
     private record ParsedMaterialSlot(String requirement, int count) {}
+    private record CostCandidateFilter(String cardType, String race, String quotedTerm) {}
     private record ZonedMaterial(Card card, String zone, boolean specialSummonedThisTurn) {}
 
     // Construction
@@ -229,7 +230,7 @@ final class ComboEngine {
         if (!relevantQuotedTerms.isEmpty()) {
             return relevantQuotedTerms.stream().anyMatch(term ->
                     safeLower(target.getName()).contains(safeLower(term))
-                            || safeLower(target.getArchetype()).contains(safeLower(term)));
+                            || hasMatchingArchetype(target, term));
         }
 
         if (containsAny(effectText,
@@ -356,12 +357,12 @@ final class ComboEngine {
                         .map(this::toMaterialCardOption)
                         .collect(Collectors.toList());
             } else {
-                eligibleCards = cardRepository.findAllProjectedBy().stream()
+                eligibleCards = findCostCandidates(requirement).stream()
                         .filter(card -> !safeLower(cost).contains("other")
                                 || !card.getName().equalsIgnoreCase(source.getName()))
                         .filter(card -> !isExcludedFromCost(card.getName(), cost))
                         .filter(card -> matchesGeneralCostRequirement(
-                                card.getName(), card.getType(), card.getArchetype(), null, requirement))
+                                card.getName(), card.getType(), card.getArchetype(), card.getRace(), requirement))
                         .sorted(Comparator.comparing(
                                 CardRepository.CostCardView::getName,
                                 String.CASE_INSENSITIVE_ORDER))
@@ -421,11 +422,15 @@ final class ComboEngine {
     // Fusion route discovery and material parsing
 
     private List<Card> getRelatedArchetypeCards(Card card) {
-        if (card.getArchetype() == null || card.getArchetype().isBlank()) {
+        List<String> archetypes = card.getArchetypes();
+        if (archetypes.isEmpty()) {
             return Collections.emptyList();
         }
 
-        return cardRepository.findByArchetypeContainingIgnoreCase(card.getArchetype()).stream()
+        List<Card> relatedCards = archetypes.size() == 1
+                ? cardRepository.findByArchetypeContainingIgnoreCase(archetypes.get(0))
+                : cardRepository.findByArchetypesIn(archetypes);
+        return relatedCards.stream()
                 .filter(other -> !Objects.equals(other.getId(), card.getId()))
                 .sorted(Comparator
                         .comparingInt(Card::getWeight).reversed()
@@ -635,7 +640,7 @@ final class ComboEngine {
                 if (controlled == null) return name.equalsIgnoreCase(requiredName);
                 return controlled.getName().equalsIgnoreCase(requiredName)
                         || familyMatch && (safeLower(controlled.getName()).contains(safeLower(requiredName))
-                        || safeLower(controlled.getArchetype()).contains(safeLower(requiredName)));
+                        || hasMatchingArchetype(controlled, requiredName));
             });
             if (!controlsRequiredCard) {
                 return "This effect requires you to control "
@@ -784,7 +789,7 @@ final class ComboEngine {
         return quotedTerms.stream().allMatch(term -> {
             String quoted = safeLower(term);
             return safeLower(card.getName()).contains(quoted)
-                    || safeLower(card.getArchetype()).contains(quoted)
+                    || hasMatchingArchetype(card, quoted)
                     || safeLower(card.getDescription()).contains(quoted);
         });
     }
@@ -1116,7 +1121,7 @@ final class ComboEngine {
         if (namedFamily.find()) {
             String family = safeLower(namedFamily.group(1));
             return safeLower(target.getName()).contains(family)
-                    || safeLower(target.getArchetype()).contains(family);
+                    || hasMatchingArchetype(target, family);
         }
         return true;
     }
@@ -1180,7 +1185,7 @@ final class ComboEngine {
             if (normalized.equals("\"" + quoted + "\"")) {
                 return name.equals(quoted);
             }
-            if (!name.contains(quoted) && !safeLower(card.getArchetype()).contains(quoted)) {
+            if (!name.contains(quoted) && !hasMatchingArchetype(card, quoted)) {
                 return false;
             }
         }
@@ -1302,6 +1307,41 @@ final class ComboEngine {
         String quoted = safeLower(quotedTerms.get(0));
         return safeLower(cardName).contains(quoted)
                 || safeLower(cardArchetype).contains(quoted);
+    }
+
+    private List<CardRepository.CostCardView> findCostCandidates(String requirement) {
+        Map<Long, CardRepository.CostCardView> candidates = new LinkedHashMap<>();
+        for (CostCandidateFilter filter : costCandidateFilters(requirement)) {
+            List<CardRepository.CostCardView> matchingCards = filter.quotedTerm() == null
+                    ? cardRepository.findCostCandidatesByTypeAndRace(
+                            filter.cardType(), filter.race())
+                    : cardRepository.findCostCandidatesByQuotedTerm(
+                            filter.cardType(), filter.race(), filter.quotedTerm());
+            matchingCards
+                    .forEach(card -> candidates.putIfAbsent(card.getId(), card));
+        }
+        return new ArrayList<>(candidates.values());
+    }
+
+    private List<CostCandidateFilter> costCandidateFilters(String requirement) {
+        String normalized = safeLower(requirement);
+        String[] alternatives = normalized.split("\\s+or\\s+(?:\\d+\\s+)?(?:other\\s+)?");
+        Set<CostCandidateFilter> filters = new LinkedHashSet<>();
+        for (String alternative : alternatives) {
+            String cardType = Stream.of("monster", "spell", "trap")
+                    .filter(alternative::contains)
+                    .findFirst()
+                    .orElse(null);
+            String race = MONSTER_RACES.stream()
+                    .filter(candidate -> alternative.contains(candidate + " monster"))
+                    .findFirst()
+                    .orElse(null);
+            String quotedTerm = extractQuotedTerms(alternative).stream()
+                    .findFirst()
+                    .orElse(null);
+            filters.add(new CostCandidateFilter(cardType, race, quotedTerm));
+        }
+        return new ArrayList<>(filters);
     }
 
     private boolean isExcludedFromCost(String cardName, String cost) {
@@ -1888,7 +1928,7 @@ final class ComboEngine {
         if (quotedFamily.find()) {
             String family = safeLower(quotedFamily.group(1));
             return safeLower(candidate.getName()).contains(family)
-                    || safeLower(candidate.getArchetype()).contains(family)
+                    || hasMatchingArchetype(candidate, family)
                     || safeLower(candidate.getDescription()).contains(family);
         }
         return true;
@@ -2373,19 +2413,32 @@ final class ComboEngine {
     }
 
     private boolean sameArchetype(Card sourceCard, Card targetCard) {
-        String sourceArchetype = safeLower(sourceCard.getArchetype()).trim();
-        String targetArchetype = safeLower(targetCard.getArchetype()).trim();
-        if (sourceArchetype.isBlank() || targetArchetype.isBlank()) {
-            return false;
-        }
-        return sourceArchetype.equals(targetArchetype);
+        Set<String> sourceArchetypes = sourceCard.getArchetypes().stream()
+                .map(this::safeLower)
+                .map(String::trim)
+                .filter(archetype -> !archetype.isBlank())
+                .collect(Collectors.toSet());
+        return targetCard.getArchetypes().stream()
+                .map(this::safeLower)
+                .map(String::trim)
+                .anyMatch(sourceArchetypes::contains);
     }
 
     private boolean sameArchetype(String sourceArchetype, Card targetCard) {
-        String targetArchetype = safeLower(targetCard.getArchetype()).trim();
-        if (sourceArchetype == null || sourceArchetype.isBlank() || targetArchetype.isBlank()) {
+        if (sourceArchetype == null || sourceArchetype.isBlank()) {
             return false;
         }
-        return sourceArchetype.trim().equals(targetArchetype);
+        String normalizedSource = safeLower(sourceArchetype).trim();
+        return targetCard.getArchetypes().stream()
+                .map(this::safeLower)
+                .map(String::trim)
+                .anyMatch(normalizedSource::equals);
+    }
+
+    private boolean hasMatchingArchetype(Card card, String term) {
+        String normalizedTerm = safeLower(term);
+        return card.getArchetypes().stream()
+                .map(this::safeLower)
+                .anyMatch(archetype -> archetype.contains(normalizedTerm));
     }
 }
