@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
@@ -55,12 +56,26 @@ public class CardReferenceDataService {
                 archetypeRepository::findByNameIn,
                 Archetype::new,
                 archetypeRepository::saveAll);
+        List<Archetype> knownArchetypes = archetypeRepository.findAllByOrderByNameAsc();
 
         for (Card card : cards) {
-            card.setTypeReference(types.get(card.getType()));
-            card.setRaceReference(races.get(card.getRace()));
-            card.setAttributeReference(attributes.get(card.getAttribute()));
-            card.setArchetypeReference(archetypes.get(card.getArchetype()));
+            Archetype primaryArchetype = reference(archetypes, card.getArchetype());
+            card.setTypeReference(reference(types, card.getType()));
+            card.setRaceReference(reference(races, card.getRace()));
+            card.setAttributeReference(reference(attributes, card.getAttribute()));
+            card.setArchetypeReference(primaryArchetype);
+
+            Map<String, Archetype> memberships = knownArchetypes.stream()
+                    .filter(archetype -> cardNameMatchesArchetype(card.getName(), archetype.getName()))
+                    .collect(Collectors.toMap(
+                            Archetype::getName,
+                            Function.identity(),
+                            (first, ignored) -> first,
+                            java.util.LinkedHashMap::new));
+            if (primaryArchetype != null) {
+                memberships.putIfAbsent(primaryArchetype.getName(), primaryArchetype);
+            }
+            card.setArchetypeReferences(memberships.values());
         }
     }
 
@@ -111,5 +126,32 @@ public class CardReferenceDataService {
                 .map(getter)
                 .filter(name -> name != null)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    static boolean cardNameMatchesArchetype(String cardName, String archetypeName) {
+        if (cardName == null || archetypeName == null || archetypeName.isBlank()) {
+            return false;
+        }
+
+        String normalizedName = cardName.toLowerCase(Locale.ROOT);
+        String normalizedArchetype = archetypeName.toLowerCase(Locale.ROOT);
+        int fromIndex = 0;
+        int matchIndex;
+        while ((matchIndex = normalizedName.indexOf(normalizedArchetype, fromIndex)) >= 0) {
+            int matchEnd = matchIndex + normalizedArchetype.length();
+            boolean startsAtBoundary = matchIndex == 0
+                    || !Character.isLetterOrDigit(normalizedName.charAt(matchIndex - 1));
+            boolean endsAtBoundary = matchEnd == normalizedName.length()
+                    || !Character.isLetterOrDigit(normalizedName.charAt(matchEnd));
+            if (startsAtBoundary && endsAtBoundary) {
+                return true;
+            }
+            fromIndex = matchIndex + 1;
+        }
+        return false;
+    }
+
+    private <T> T reference(Map<String, T> references, String name) {
+        return name == null ? null : references.get(name);
     }
 }
