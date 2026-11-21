@@ -3,7 +3,10 @@ package com.aimestart.yugiohsearch;
 import jakarta.persistence.*;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 @Entity
 @Table(name = "cards")
@@ -14,6 +17,7 @@ import java.util.List;
                 @NamedAttributeNode("raceReference"),
                 @NamedAttributeNode("attributeReference"),
                 @NamedAttributeNode("archetypeReference"),
+                @NamedAttributeNode("archetypeReferences"),
                 @NamedAttributeNode("linkmarkers")
         }
 )
@@ -56,6 +60,15 @@ public class Card {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "archetype_id")
     private Archetype archetypeReference;
+
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(
+            name = "card_archetypes",
+            joinColumns = @JoinColumn(name = "card_id"),
+            inverseJoinColumns = @JoinColumn(name = "archetype_id")
+    )
+    @OrderBy("name ASC")
+    private Set<Archetype> archetypeReferences = new LinkedHashSet<>();
 
     @Column
     private Integer scale;
@@ -171,6 +184,22 @@ public class Card {
         this.archetypeReference = archetype == null ? null : new Archetype(archetype);
     }
 
+    public List<String> getArchetypes() {
+        LinkedHashSet<String> names = new LinkedHashSet<>();
+        if (archetypeReference != null) {
+            names.add(archetypeReference.getName());
+        }
+        archetypeReferences.stream()
+                .map(Archetype::getName)
+                .forEach(names::add);
+        return List.copyOf(names);
+    }
+
+    public boolean hasArchetype(String archetype) {
+        return archetype != null && getArchetypes().stream()
+                .anyMatch(name -> name.equalsIgnoreCase(archetype));
+    }
+
     void setTypeReference(CardType typeReference) {
         this.typeReference = typeReference;
     }
@@ -185,6 +214,10 @@ public class Card {
 
     void setArchetypeReference(Archetype archetypeReference) {
         this.archetypeReference = archetypeReference;
+    }
+
+    void setArchetypeReferences(Collection<Archetype> archetypeReferences) {
+        this.archetypeReferences = new LinkedHashSet<>(archetypeReferences);
     }
 
     public Integer getScale() {
