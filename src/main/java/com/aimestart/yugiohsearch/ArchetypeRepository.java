@@ -8,5 +8,6 @@ import java.util.List;
 
 public interface ArchetypeRepository extends JpaRepository<Archetype, Integer> {
     List<Archetype> findByNameIn(Collection<String> names);
+    List<Archetype> findAllByOrderByNameAsc();
     List<Archetype> findByNameContainingIgnoreCaseOrderByNameAsc(String name, Pageable pageable);
 }
