@@ -68,9 +68,9 @@ test('generic discard costs remain activation prerequisites', () => {
 
 test('multi-card searches filter the requested family and exclude Extra Deck monsters', () => {
   const requirement = effectSearchRequirement(betrayalEffect)
-  assert.equal(isEffectSearchCandidate({ name: 'Exosister Martha', archetype: 'Exosister', type: 'Effect Monster' }, requirement), true)
-  assert.equal(isEffectSearchCandidate({ name: 'Exosister Mikailis', archetype: 'Exosister', type: 'Xyz Monster' }, requirement), false)
-  assert.equal(isEffectSearchCandidate({ name: 'Unrelated Monster', archetype: 'Other', type: 'Effect Monster' }, requirement), false)
+  assert.equal(isEffectSearchCandidate({ name: 'Exosister Martha', archetypes: ['Exosister'], type: 'Effect Monster' }, requirement), true)
+  assert.equal(isEffectSearchCandidate({ name: 'Exosister Mikailis', archetypes: ['Exosister'], type: 'Xyz Monster' }, requirement), false)
+  assert.equal(isEffectSearchCandidate({ name: 'Unrelated Monster', archetypes: ['Other'], type: 'Effect Monster' }, requirement), false)
 })
 
 test('direct effect targets are parsed independently from combo recommendations', () => {

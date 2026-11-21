@@ -47,7 +47,7 @@ function descriptorMatchesCard(descriptor, card) {
   const normalized = descriptor.toLowerCase()
   const type = (card.type || '').toLowerCase()
   const name = (card.name || '').toLowerCase()
-  const archetype = (card.archetype || '').toLowerCase()
+  const archetypes = (card.archetypes || []).map(archetype => archetype.toLowerCase())
   const attribute = (card.attribute || '').toLowerCase()
   const race = (card.race || '').toLowerCase()
   let recognized = false
@@ -76,7 +76,7 @@ function descriptorMatchesCard(descriptor, card) {
     const quoted = match[1].toLowerCase()
     const textAfterQuote = descriptor.slice(match.index + match[0].length)
     const namesFamily = /^\s+(?:monsters?|cards?)\b/i.test(textAfterQuote)
-    if (namesFamily ? name.includes(quoted) || archetype === quoted : name === quoted) return true
+    if (namesFamily ? name.includes(quoted) || archetypes.includes(quoted) : name === quoted) return true
   }
   if (quotedTerms.length > 0) return false
 
@@ -86,7 +86,7 @@ function descriptorMatchesCard(descriptor, card) {
       .trim()
   if (plainDescriptor) {
     recognized = true
-    if (name === plainDescriptor || archetype === plainDescriptor) return true
+    if (name === plainDescriptor || archetypes.includes(plainDescriptor)) return true
   }
   return recognized ? false : null
 }

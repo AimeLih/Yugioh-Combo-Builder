@@ -343,7 +343,7 @@ class YugiohServiceTest {
         tooHigh.setLevel(10);
 
         when(repository.getCardByName(albion.getName())).thenReturn(albion);
-        when(repository.findByArchetypeContainingIgnoreCase(albion.getArchetype())).thenReturn(List.of());
+        when(repository.findByArchetypeContainingIgnoreCase(albion.getArchetypes().get(0))).thenReturn(List.of());
         when(repository.findByTypeContainingIgnoreCase("fusion"))
                 .thenReturn(List.of(albion, legalTarget, tooHigh));
 
@@ -375,7 +375,7 @@ class YugiohServiceTest {
                 "Fusion Monster", "Other");
 
         when(repository.getCardByName(brandedFusion.getName())).thenReturn(brandedFusion);
-        when(repository.findByArchetypeContainingIgnoreCase(brandedFusion.getArchetype())).thenReturn(List.of());
+        when(repository.findByArchetypeContainingIgnoreCase(brandedFusion.getArchetypes().get(0))).thenReturn(List.of());
         when(repository.findByNameContainingIgnoreCase(org.mockito.ArgumentMatchers.anyString())).thenReturn(List.of());
         when(repository.findByTypeContainingIgnoreCaseAndDescriptionContainingIgnoreCase(
                 "Fusion",
@@ -534,7 +534,7 @@ class YugiohServiceTest {
         when(paymentView.getId()).thenReturn(payment.getId());
         when(paymentView.getName()).thenReturn(payment.getName());
         when(paymentView.getType()).thenReturn(payment.getType());
-        when(paymentView.getArchetype()).thenReturn(payment.getArchetype());
+        when(paymentView.getArchetypes()).thenReturn(String.join("|", payment.getArchetypes()));
         when(repository.findCostCandidatesByTypeAndRace(null, null)).thenReturn(List.of(paymentView));
 
         ComboService.FusionMaterialPlan plan =
@@ -601,11 +601,11 @@ class YugiohServiceTest {
         when(riseheartView.getId()).thenReturn(riseheart.getId());
         when(riseheartView.getName()).thenReturn(riseheart.getName());
         when(riseheartView.getType()).thenReturn(riseheart.getType());
-        when(riseheartView.getArchetype()).thenReturn(riseheart.getArchetype());
+        when(riseheartView.getArchetypes()).thenReturn(String.join("|", riseheart.getArchetypes()));
         when(targetView.getId()).thenReturn(target.getId());
         when(targetView.getName()).thenReturn(target.getName());
         when(targetView.getType()).thenReturn(target.getType());
-        when(targetView.getArchetype()).thenReturn(target.getArchetype());
+        when(targetView.getArchetypes()).thenReturn(String.join("|", target.getArchetypes()));
         when(repository.findCostCandidatesByQuotedTerm("monster", null, "kashtira"))
                 .thenReturn(List.of(riseheartView, targetView));
 
@@ -635,7 +635,7 @@ class YugiohServiceTest {
         when(dragonView.getId()).thenReturn(dragon.getId());
         when(dragonView.getName()).thenReturn(dragon.getName());
         when(dragonView.getType()).thenReturn(dragon.getType());
-        when(dragonView.getArchetype()).thenReturn(dragon.getArchetype());
+        when(dragonView.getArchetypes()).thenReturn(String.join("|", dragon.getArchetypes()));
         when(dragonView.getRace()).thenReturn(dragon.getRace());
         when(repository.findCostCandidatesByTypeAndRace("monster", "dragon"))
                 .thenReturn(List.of(dragonView));
@@ -662,7 +662,7 @@ class YugiohServiceTest {
         when(kashtiraView.getId()).thenReturn(3L);
         when(kashtiraView.getName()).thenReturn("Kashtira Fenrir");
         when(kashtiraView.getType()).thenReturn("Effect Monster");
-        when(kashtiraView.getArchetype()).thenReturn("Kashtira");
+        when(kashtiraView.getArchetypes()).thenReturn("Kashtira");
         when(kashtiraView.getRace()).thenReturn("Psychic");
         when(dragonView.getId()).thenReturn(4L);
         when(dragonView.getName()).thenReturn("Database Dragon");
@@ -1153,7 +1153,7 @@ class YugiohServiceTest {
         assertNull(savedCard.getLevel());
         assertEquals("Cyberse", savedCard.getRace());
         assertEquals("LIGHT", savedCard.getAttribute());
-        assertEquals("New Archetype", savedCard.getArchetype());
+        assertEquals(List.of("New Archetype"), savedCard.getArchetypes());
         assertEquals(3, savedCard.getLinkvalue());
         assertEquals(List.of("Top", "Bottom-Left", "Bottom-Right"), savedCard.getLinkmarkers());
         assertEquals("https://example.com/new-link.jpg", savedCard.getCardImageUrl());
@@ -1205,13 +1205,13 @@ class YugiohServiceTest {
 
     private void stubRelatedCards(Card source, List<Card> related) {
         when(repository.getCardByName(source.getName())).thenReturn(source);
-        when(repository.findByArchetypeContainingIgnoreCase(source.getArchetype())).thenReturn(related);
+        when(repository.findByArchetypeContainingIgnoreCase(source.getArchetypes().get(0))).thenReturn(related);
         when(repository.findByNameContainingIgnoreCase(org.mockito.ArgumentMatchers.anyString())).thenReturn(List.of());
     }
 
     private Card card(long id, String name, String description, String type, String archetype) {
         Card card = new Card(name, description, type, 0);
-        card.setArchetype(archetype);
+        card.setArchetypeNames(archetype == null ? List.of() : List.of(archetype));
         try {
             Field idField = Card.class.getDeclaredField("id");
             idField.setAccessible(true);

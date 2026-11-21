@@ -52,18 +52,19 @@ public class CardReferenceDataService {
                 CardAttribute::new,
                 cardAttributeRepository::saveAll);
         Map<String, Archetype> archetypes = resolve(
-                names(cards, Card::getArchetype),
+                cards.stream()
+                        .flatMap(card -> card.getArchetypes().stream())
+                        .collect(Collectors.toCollection(LinkedHashSet::new)),
                 archetypeRepository::findByNameIn,
                 Archetype::new,
                 archetypeRepository::saveAll);
         List<Archetype> knownArchetypes = archetypeRepository.findAllByOrderByNameAsc();
 
         for (Card card : cards) {
-            Archetype primaryArchetype = reference(archetypes, card.getArchetype());
+            List<String> explicitArchetypes = card.getArchetypes();
             card.setTypeReference(reference(types, card.getType()));
             card.setRaceReference(reference(races, card.getRace()));
             card.setAttributeReference(reference(attributes, card.getAttribute()));
-            card.setArchetypeReference(primaryArchetype);
 
             Map<String, Archetype> memberships = knownArchetypes.stream()
                     .filter(archetype -> cardNameMatchesArchetype(card.getName(), archetype.getName()))
@@ -72,8 +73,11 @@ public class CardReferenceDataService {
                             Function.identity(),
                             (first, ignored) -> first,
                             java.util.LinkedHashMap::new));
-            if (primaryArchetype != null) {
-                memberships.putIfAbsent(primaryArchetype.getName(), primaryArchetype);
+            for (String explicitArchetype : explicitArchetypes) {
+                Archetype reference = reference(archetypes, explicitArchetype);
+                if (reference != null) {
+                    memberships.putIfAbsent(reference.getName(), reference);
+                }
             }
             card.setArchetypeReferences(memberships.values());
         }

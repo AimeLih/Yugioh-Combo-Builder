@@ -12,6 +12,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -352,7 +353,7 @@ final class ComboEngine {
                                 || !card.getName().equalsIgnoreCase(source.getName()))
                         .filter(card -> !isExcludedFromCost(card.getName(), cost))
                         .filter(card -> matchesGeneralCostRequirement(
-                                card.getName(), card.getType(), card.getArchetype(), card.getRace(), requirement))
+                                card.getName(), card.getType(), card.getArchetypes(), card.getRace(), requirement))
                         .sorted(Comparator.comparing(Card::getName, String.CASE_INSENSITIVE_ORDER))
                         .map(this::toMaterialCardOption)
                         .collect(Collectors.toList());
@@ -362,7 +363,7 @@ final class ComboEngine {
                                 || !card.getName().equalsIgnoreCase(source.getName()))
                         .filter(card -> !isExcludedFromCost(card.getName(), cost))
                         .filter(card -> matchesGeneralCostRequirement(
-                                card.getName(), card.getType(), card.getArchetype(), card.getRace(), requirement))
+                                card.getName(), card.getType(), projectedArchetypes(card), card.getRace(), requirement))
                         .sorted(Comparator.comparing(
                                 CardRepository.CostCardView::getName,
                                 String.CASE_INSENSITIVE_ORDER))
@@ -741,7 +742,7 @@ final class ComboEngine {
                     .map(name -> handCards.get(safeLower(name)))
                     .filter(Objects::nonNull)
                     .filter(card -> matchesGeneralCostRequirement(
-                            card.getName(), card.getType(), card.getArchetype(), card.getRace(), requirement))
+                            card.getName(), card.getType(), card.getArchetypes(), card.getRace(), requirement))
                     .count();
             if (available < required) {
                 return "This effect requires " + required + " legal " + requirement
@@ -1292,7 +1293,7 @@ final class ComboEngine {
     private boolean matchesGeneralCostRequirement(
             String cardName,
             String cardType,
-            String cardArchetype,
+            Collection<String> cardArchetypes,
             String cardRace,
             String requirement
     ) {
@@ -1300,7 +1301,7 @@ final class ComboEngine {
         String[] alternatives = normalized.split("\\s+or\\s+(?:\\d+\\s+)?(?:other\\s+)?");
         if (alternatives.length > 1) {
             return Arrays.stream(alternatives).anyMatch(alternative -> matchesGeneralCostRequirement(
-                    cardName, cardType, cardArchetype, cardRace, alternative));
+                    cardName, cardType, cardArchetypes, cardRace, alternative));
         }
         String type = safeLower(cardType);
         if (normalized.contains("monster") && !type.contains("monster")) {
@@ -1324,7 +1325,18 @@ final class ComboEngine {
         }
         String quoted = safeLower(quotedTerms.get(0));
         return safeLower(cardName).contains(quoted)
-                || safeLower(cardArchetype).contains(quoted);
+                || cardArchetypes.stream()
+                .map(this::safeLower)
+                .anyMatch(archetype -> archetype.contains(quoted));
+    }
+
+    private List<String> projectedArchetypes(CardRepository.CostCardView card) {
+        if (card.getArchetypes() == null || card.getArchetypes().isBlank()) {
+            return Collections.emptyList();
+        }
+        return Arrays.stream(card.getArchetypes().split("\\|"))
+                .filter(archetype -> !archetype.isBlank())
+                .toList();
     }
 
     private List<CardRepository.CostCardView> findCostCandidates(String requirement) {
@@ -2346,9 +2358,11 @@ final class ComboEngine {
     private List<ComboOption> buildCuratedGuideCombos(Card card) {
         List<ComboOption> options = new ArrayList<>();
         String name = safeLower(card.getName());
-        String archetype = safeLower(card.getArchetype());
+        Set<String> archetypes = card.getArchetypes().stream()
+                .map(this::safeLower)
+                .collect(Collectors.toSet());
 
-        if (name.contains("d/d") || archetype.contains("d/d")) {
+        if (name.contains("d/d") || archetypes.stream().anyMatch(archetype -> archetype.contains("d/d"))) {
             addCuratedCombo(options, "D/D Savant Kepler", card, "Guide-backed starter: Kepler searches Dark Contract with the Gate, which searches any D/D monster.", "starter", 120);
             addCuratedCombo(options, "Dark Contract with the Gate", card, "Guide-backed starter: Gate searches any D/D monster and is itself a one-card combo.", "starter", 115);
             addCuratedCombo(options, "D/D Gryphon", card, "Guide-backed extender: Gryphon special summons itself and searches after it hits the GY.", "extender", 110);
@@ -2359,7 +2373,9 @@ final class ComboEngine {
             addCuratedCombo(options, "D/D Orthros", card, "Guide-backed utility: Orthros is the low-scale extender and backrow remover used in combo lines.", "support", 100);
         }
 
-        if (name.contains("swordsoul") || archetype.contains("swordsoul") || name.contains("incredible ecclesia")) {
+        if (name.contains("swordsoul")
+                || archetypes.stream().anyMatch(archetype -> archetype.contains("swordsoul"))
+                || name.contains("incredible ecclesia")) {
             addCuratedCombo(options, "Swordsoul of Mo Ye", card, "Guide-backed starter: Mo Ye generates a Token and is the cleanest route into Level 8 Synchro plays.", "starter", 120);
             addCuratedCombo(options, "Swordsoul Strategist Longyuan", card, "Guide-backed extender: Longyuan discards a card to reach Baronne de Fleur or other Level 10 Synchro lines.", "extender", 118);
             addCuratedCombo(options, "Swordsoul Blackout", card, "Guide-backed follow-up: Blackout is the searchable interaction piece that completes the line.", "follow-up", 112);
@@ -2367,7 +2383,9 @@ final class ComboEngine {
             addCuratedCombo(options, "Baronne de Fleur", card, "Guide-backed follow-up: Longyuan makes the simple Baronne line.", "follow-up", 114);
         }
 
-        if (name.contains("archfiend") || archetype.contains("archfiend") || name.contains("tour guide")) {
+        if (name.contains("archfiend")
+                || archetypes.stream().anyMatch(archetype -> archetype.contains("archfiend"))
+                || name.contains("tour guide")) {
             addCuratedCombo(options, "Archfiend Heiress", card, "Guide-backed searcher: Heiress converts Archfiend names into more access.", "starter", 112);
             addCuratedCombo(options, "Archfiend Strategy", card, "Guide-backed searcher: Strategy finds any Archfiend card and keeps the engine moving.", "starter", 110);
             addCuratedCombo(options, "Archfiend's Usurpation", card, "Guide-backed starter/removal card: Usurpation can start plays and acts as a ritual spell.", "starter", 108);
@@ -2375,7 +2393,9 @@ final class ComboEngine {
             addCuratedCombo(options, "Archfiend Matriarch", card, "Guide-backed follow-up: Matriarch is the grind-game recycler and follow-up threat.", "follow-up", 114);
         }
 
-        if (name.contains("dogmatika") || archetype.contains("dogmatika") || name.contains("ecclesia") || name.contains("nadir servant") || name.contains("fallen of the white dragon")) {
+        if (name.contains("dogmatika")
+                || archetypes.stream().anyMatch(archetype -> archetype.contains("dogmatika"))
+                || name.contains("ecclesia") || name.contains("nadir servant") || name.contains("fallen of the white dragon")) {
             addCuratedCombo(options, "Dogmatika Ecclesia, the Virtuous", card, "Guide-backed starter: Ecclesia searches any Dogmatika card and is the cleanest bridge into the archetype.", "starter", 120);
             addCuratedCombo(options, "Nadir Servant", card, "Guide-backed starter: Nadir Servant sends an Extra Deck monster to access Dogmatika pieces.", "starter", 116);
             addCuratedCombo(options, "Dogmatika Punishment", card, "Guide-backed follow-up: Punishment is the main trap interaction and converts into ED-based removal.", "follow-up", 112);
@@ -2383,7 +2403,9 @@ final class ComboEngine {
             addCuratedCombo(options, "The Fallen & The Virtuous", card, "Guide-backed follow-up: the main send-and-destroy spell that converts Dogmatika setup into tempo.", "follow-up", 114);
         }
 
-        if (name.contains("exosister") || archetype.contains("exosister") || name.contains("martha") || name.contains("pax")) {
+        if (name.contains("exosister")
+                || archetypes.stream().anyMatch(archetype -> archetype.contains("exosister"))
+                || name.contains("martha") || name.contains("pax")) {
             addCuratedCombo(options, "Exosister Martha", card, "Guide-backed starter: Martha is the easiest way to get an Exosister body on board.", "starter", 120);
             addCuratedCombo(options, "Exosister Pax", card, "Guide-backed starter: Pax is the deck's main search spell and links the rest of the line together.", "starter", 118);
             addCuratedCombo(options, "Exosister Mikailis", card, "Guide-backed follow-up: Mikailis is the primary first Xyz that turns the starter into advantage.", "follow-up", 116);
@@ -2392,7 +2414,9 @@ final class ComboEngine {
             addCuratedCombo(options, "Exosister Karmael", card, "Guide-backed follow-up: Karmael gives the deck another disruption layer and a way to keep playing.", "follow-up", 106);
         }
 
-        if (name.contains("stardust") || name.contains("bystial") || archetype.contains("bystial") || archetype.contains("stardust")) {
+        if (name.contains("stardust") || name.contains("bystial")
+                || archetypes.stream().anyMatch(archetype ->
+                        archetype.contains("bystial") || archetype.contains("stardust"))) {
             addCuratedCombo(options, "Stardust Dragon", card, "Guide-backed starter: Stardust is the centerpiece used to branch into the modern Synchro lines.", "starter", 120);
             addCuratedCombo(options, "Bystial Magnamhut", card, "Guide-backed extender: Magnamhut is one of the best ways to convert a grave setup into follow-up.", "extender", 118);
             addCuratedCombo(options, "Bystial Druiswurm", card, "Guide-backed extender: Druiswurm is a live Bystial body that both pressures and clears cards.", "extender", 114);

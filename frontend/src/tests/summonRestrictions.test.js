@@ -10,13 +10,13 @@ const trudea = {
   id: 1,
   name: 'Centur-Ion Trudea',
   type: 'Effect Monster',
-  archetype: 'Centur-Ion',
+  archetypes: ['Centur-Ion'],
   description: 'During your Main Phase: You can place this card you control and 1 "Centur-Ion" monster from your hand or Deck, except "Centur-Ion Trudea", in your Spell & Trap Zones as face-up Continuous Traps, also you cannot Special Summon "Centur-Ion Trudea" for the rest of this turn.',
 }
 
 test('Trudea locks only Trudea rather than the entire Centur-Ion archetype', () => {
   const restrictions = activationSummonRestrictions(trudea, trudea.description)
-  const atrii = { name: 'Centur-Ion Atrii', type: 'Tuner Monster', archetype: 'Centur-Ion' }
+  const atrii = { name: 'Centur-Ion Atrii', type: 'Tuner Monster', archetypes: ['Centur-Ion'] }
 
   assert.equal(restrictions.length, 1)
   assert.equal(restrictions[0].allowed, '')
@@ -72,12 +72,12 @@ test('quoted archetype wording remains a family match', () => {
   assert.equal(restrictionAllowsCard(restriction, {
     name: 'Centur-Ion Atrii',
     type: 'Tuner Monster',
-    archetype: 'Centur-Ion',
+    archetypes: ['Centur-Ion'],
   }, false), true)
   assert.equal(restrictionAllowsCard(restriction, {
     name: 'Ash Blossom & Joyous Spring',
     type: 'Tuner Monster',
-    archetype: '',
+    archetypes: [],
   }, false), false)
 })
 

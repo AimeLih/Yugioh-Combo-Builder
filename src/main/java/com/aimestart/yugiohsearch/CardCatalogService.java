@@ -185,7 +185,7 @@ public class CardCatalogService {
         }
 
         if (apiCard.archetype() != null && !apiCard.archetype().isBlank()) {
-            card.setArchetype(apiCard.archetype());
+            card.setArchetypeNames(List.of(apiCard.archetype()));
         }
     }
 

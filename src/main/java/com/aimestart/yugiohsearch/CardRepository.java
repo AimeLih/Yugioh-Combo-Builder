@@ -15,7 +15,7 @@ public interface CardRepository extends JpaRepository<Card, Long> {
         Long getId();
         String getName();
         String getType();
-        String getArchetype();
+        String getArchetypes();
         String getRace();
     }
 
@@ -52,15 +52,11 @@ public interface CardRepository extends JpaRepository<Card, Long> {
               and (:raceId is null or raceReference.id = :raceId)
               and (:fieldSpell is null or :fieldSpell = false or lower(raceReference.name) = 'field')
               and (:attributeId is null or attributeReference.id = :attributeId)
-              and (
-                :archetypeId is null
-                or card.archetypeReference.id = :archetypeId
-                or exists (
+              and (:archetypeId is null or exists (
                     select membership.id
                     from card.archetypeReferences membership
                     where membership.id = :archetypeId
-                )
-              )
+              ))
               and (:level is null or card.level = :level)
               and (
                 :tuner is null
@@ -122,11 +118,10 @@ public interface CardRepository extends JpaRepository<Card, Long> {
             select card.id as id,
                    card.name as name,
                    typeReference.name as type,
-                   archetypeReference.name as archetype,
+                   '' as archetypes,
                    raceReference.name as race
             from Card card
             join card.typeReference typeReference
-            left join card.archetypeReference archetypeReference
             left join card.raceReference raceReference
             where (:cardType is null
                     or lower(typeReference.name) like lower(concat('%', :cardType, '%')))
@@ -156,13 +151,17 @@ public interface CardRepository extends JpaRepository<Card, Long> {
             select card.id as id,
                    card.name as name,
                    type_reference.name as type,
-                   archetype_reference.name as archetype,
+                   coalesce((
+                       select string_agg(membership_archetype.name, '|' order by membership_archetype.name)
+                       from card_archetypes card_membership
+                       join archetypes membership_archetype
+                           on membership_archetype.id = card_membership.archetype_id
+                       where card_membership.card_id = card.id
+                   ), '') as archetypes,
                    race_reference.name as race
             from candidate_ids candidate
             join cards card on card.id = candidate.id
             join card_types type_reference on type_reference.id = card.type_id
-            left join archetypes archetype_reference
-                on archetype_reference.id = card.archetype_id
             left join card_races race_reference on race_reference.id = card.race_id
             where (cast(:cardType as text) is null
                     or lower(type_reference.name)

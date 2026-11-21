@@ -16,7 +16,6 @@ import java.util.Set;
                 @NamedAttributeNode("typeReference"),
                 @NamedAttributeNode("raceReference"),
                 @NamedAttributeNode("attributeReference"),
-                @NamedAttributeNode("archetypeReference"),
                 @NamedAttributeNode("archetypeReferences"),
                 @NamedAttributeNode("linkmarkers")
         }
@@ -57,10 +56,6 @@ public class Card {
     @JoinColumn(name = "attribute_id")
     private CardAttribute attributeReference;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "archetype_id")
-    private Archetype archetypeReference;
-
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
             name = "card_archetypes",
@@ -69,6 +64,9 @@ public class Card {
     )
     @OrderBy("name ASC")
     private Set<Archetype> archetypeReferences = new LinkedHashSet<>();
+
+    @Transient
+    private Set<String> pendingArchetypeNames = new LinkedHashSet<>();
 
     @Column
     private Integer scale;
@@ -176,23 +174,15 @@ public class Card {
         this.attributeReference = attribute == null ? null : new CardAttribute(attribute);
     }
 
-    public String getArchetype() {
-        return archetypeReference == null ? null : archetypeReference.getName();
-    }
-
-    public void setArchetype(String archetype) {
-        this.archetypeReference = archetype == null ? null : new Archetype(archetype);
-    }
-
     public List<String> getArchetypes() {
         LinkedHashSet<String> names = new LinkedHashSet<>();
-        if (archetypeReference != null) {
-            names.add(archetypeReference.getName());
-        }
         archetypeReferences.stream()
                 .map(Archetype::getName)
                 .forEach(names::add);
-        return List.copyOf(names);
+        names.addAll(pendingArchetypeNames);
+        return names.stream()
+                .sorted(String.CASE_INSENSITIVE_ORDER)
+                .toList();
     }
 
     public boolean hasArchetype(String archetype) {
@@ -212,12 +202,15 @@ public class Card {
         this.attributeReference = attributeReference;
     }
 
-    void setArchetypeReference(Archetype archetypeReference) {
-        this.archetypeReference = archetypeReference;
+    void setArchetypeNames(Collection<String> archetypeNames) {
+        this.pendingArchetypeNames = archetypeNames.stream()
+                .filter(name -> name != null && !name.isBlank())
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
     }
 
     void setArchetypeReferences(Collection<Archetype> archetypeReferences) {
         this.archetypeReferences = new LinkedHashSet<>(archetypeReferences);
+        this.pendingArchetypeNames.clear();
     }
 
     public Integer getScale() {

@@ -111,7 +111,7 @@ export function isEffectSearchCandidate(card, requirement) {
   if (!requirement.family) return true
   const family = requirement.family.toLowerCase()
   return (card.name || '').toLowerCase().includes(family)
-      || (card.archetype || '').toLowerCase().includes(family)
+      || (card.archetypes || []).some(archetype => archetype.toLowerCase().includes(family))
 }
 
 export function genericDiscardRequirement(effectText) {
