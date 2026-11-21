@@ -562,7 +562,7 @@ function cardEffectOptions(card, zone = null, entry = null) {
       .filter(text => !isPassiveEffectText(text))
       .filter(text => !/^you can only (?:use|activate)\b/i.test(text))
       .filter(text => !/^you cannot special summon\b/i.test(text))
-      .filter(text => /\b(you can|add|draw|summon|place|set|send|discard|tribute|banish|destroy|return|target|activate)\b/i.test(text))
+      .filter(text => /\b(you can|add|draw|summon(?:ed|ing)?|place|set|send|discard|tribute|banish|destroy|return|target|activate)\b/i.test(text))
       .map(text => ({
         text,
         sourceZone: effectSourceZone(text, card, section.sourceZone),
@@ -829,6 +829,32 @@ function TributeSummonPicker({ request, onConfirm, onCancel }) {
             >
               Tribute and Summon
             </button>
+          </div>
+        </section>
+      </div>
+  )
+}
+
+function SummonMethodPicker({ request, onNormalSummon, onSpecialSummon, onCancel }) {
+  if (!request) return null
+
+  return (
+      <div className="material-picker-backdrop" role="presentation">
+        <section className="extra-deck-picker route-cost-picker" role="dialog" aria-modal="true" aria-labelledby="summon-method-title">
+          <div className="material-picker-header">
+            <div>
+              <div className="material-picker-kicker">Choose Summon Method</div>
+              <h3 id="summon-method-title">{request.card.name}</h3>
+            </div>
+            <button type="button" className="material-picker-close" onClick={onCancel}>Close</button>
+          </div>
+          <div className="extra-deck-field-summary route-cost-summary">
+            <strong>How do you want to summon this card?</strong>
+            <span>A Normal Summon follows the card's Level and Tribute rules. A Special Summon activates the card's printed self-summon effect and checks its conditions and costs.</span>
+          </div>
+          <div className="material-picker-actions">
+            <button type="button" className="material-cancel-btn" onClick={onNormalSummon}>Normal Summon</button>
+            <button type="button" className="material-confirm-btn" onClick={onSpecialSummon}>Use Special Summon effect</button>
           </div>
         </section>
       </div>
@@ -2683,6 +2709,7 @@ export default function App() {
   const [placementSelection, setPlacementSelection] = useState(null)
   const [zoneSlotRequest, setZoneSlotRequest] = useState(null)
   const [tributeSummonRequest, setTributeSummonRequest] = useState(null)
+  const [summonMethodRequest, setSummonMethodRequest] = useState(null)
   const summonEffectQueue = useRef([])
   const [pendingOption, setPendingOption] = useState(null)
   const [materialPlan, setMaterialPlan] = useState(null)
@@ -2875,6 +2902,7 @@ export default function App() {
     setXyzMaterialPreview(null)
     setPlacementSelection(card)
     setZoneSlotRequest(null)
+    setSummonMethodRequest(null)
     summonEffectQueue.current = []
     setExtraDeckPickerOpen(false)
     setPendulumPickerOpen(false)
@@ -3092,6 +3120,7 @@ export default function App() {
     setPlacementSelection(null)
     setZoneSlotRequest(null)
     setTributeSummonRequest(null)
+    setSummonMethodRequest(null)
     setError(null)
     if (destination === 'monsterZone' || destination === 'extraMonsterZone') {
       promptOnSummonEffects(card, entry, destination)
@@ -3137,6 +3166,7 @@ export default function App() {
     setPlacementSelection(null)
     setZoneSlotRequest(null)
     setTributeSummonRequest(null)
+    setSummonMethodRequest(null)
     setSearchDraggedCard(null)
     summonEffectQueue.current = []
     setComboOptions([])
@@ -3205,7 +3235,16 @@ export default function App() {
     ]))
   }
 
-  function moveZoneCardReason(entry, fromZone, toZone, preferredSlot = null, tributeEntries = []) {
+  function selfSpecialSummonOptions(entry) {
+    if (!entry?.card) return []
+    return unusedEffectOptions(
+        entry,
+        cardEffectOptions(entry.card, 'hand', entry),
+        activatedEffects,
+    ).filter(effect => specialSummonsSelfFromZone(effect.text, 'hand'))
+  }
+
+  function moveZoneCardReason(entry, fromZone, toZone, preferredSlot = null, tributeEntries = [], summonMethod = 'auto') {
     if (!entry || !ZONE_KEYS.includes(fromZone) || !ZONE_KEYS.includes(toZone)) return 'Unknown zone.'
     if (!zones[fromZone].some(candidate => candidate.instanceId === entry.instanceId)) return 'That card is no longer in its original zone.'
     if (!manualPlacementZones(entry.card).includes(toZone)) {
@@ -3221,17 +3260,22 @@ export default function App() {
       return `This card is already in ${zoneSlotLabel(toZone, preferredSlot)}.`
     }
 
-    const requiredTributes = fromZone === 'hand' && toZone === 'monsterZone'
+    const isHandMonsterSummon = fromZone === 'hand' && toZone === 'monsterZone'
+    const hasSelfSpecialSummon = isHandMonsterSummon && selfSpecialSummonOptions(entry).length > 0
+    const requiredTributes = isHandMonsterSummon
       ? normalSummonTributeCount(entry.card)
       : 0
     const availableTributes = tributeSummonCandidates(zones)
-    if (requiredTributes > availableTributes.length) {
+    if (requiredTributes > availableTributes.length
+        && (summonMethod === 'normal' || !hasSelfSpecialSummon)) {
       return `${entry.card.name} requires ${requiredTributes} Tribute${requiredTributes === 1 ? '' : 's'} to Normal Summon.`
     }
 
     const validationTributes = tributeEntries.length > 0
       ? tributeEntries
-      : availableTributes.slice(0, requiredTributes)
+      : summonMethod === 'special' || (hasSelfSpecialSummon && requiredTributes > availableTributes.length)
+        ? []
+        : availableTributes.slice(0, requiredTributes)
     const projectedZones = zonesWithoutEntry(entry, fromZone, validationTributes)
     if (toZone === 'monsterZone') {
       let open = openMainMonsterSlots(projectedZones)
@@ -3270,16 +3314,27 @@ export default function App() {
     return ''
   }
 
-  function moveZoneCard(entry, fromZone, toZone, preferredSlot = null, tributeEntries = null) {
+  function moveZoneCard(entry, fromZone, toZone, preferredSlot = null, tributeEntries = null, summonMethod = null) {
+    const isHandMonsterSummon = fromZone === 'hand' && toZone === 'monsterZone'
+    const selfSummonEffects = isHandMonsterSummon ? selfSpecialSummonOptions(entry) : []
+    if (summonMethod === null && selfSummonEffects.length > 0) {
+      setSummonMethodRequest({
+        card: entry.card,
+        onNormalSummon: () => moveZoneCard(entry, fromZone, toZone, preferredSlot, null, 'normal'),
+        onSpecialSummon: () => requestEffectActivation(entry, 'hand', { selfSpecialSummonOnly: true }),
+      })
+      setError(null)
+      return
+    }
     const requiredTributes = fromZone === 'hand' && toZone === 'monsterZone'
       ? normalSummonTributeCount(entry.card)
       : 0
     if (requiredTributes > 0 && tributeEntries === null) {
-      requestTributeSummon(entry.card, selected => moveZoneCard(entry, fromZone, toZone, preferredSlot, selected))
+      requestTributeSummon(entry.card, selected => moveZoneCard(entry, fromZone, toZone, preferredSlot, selected, 'normal'))
       return
     }
     const selectedTributes = tributeEntries ?? []
-    const invalidReason = moveZoneCardReason(entry, fromZone, toZone, preferredSlot, selectedTributes)
+    const invalidReason = moveZoneCardReason(entry, fromZone, toZone, preferredSlot, selectedTributes, 'normal')
     if (invalidReason) {
       setError(invalidReason)
       return
@@ -3298,7 +3353,7 @@ export default function App() {
           entry.card.name,
           toZone === 'monsterZone' ? 'Choose a Main Monster Zone' : 'Choose an Extra Monster Zone',
           choices,
-          choice => moveZoneCard(entry, fromZone, toZone, choice.slot, selectedTributes),
+          choice => moveZoneCard(entry, fromZone, toZone, choice.slot, selectedTributes, 'normal'),
       )
       return
     }
@@ -3947,7 +4002,7 @@ export default function App() {
     }
   }
 
-  async function requestEffectActivation(entry = selectedEntry, zone = activeZoneContext) {
+  async function requestEffectActivation(entry = selectedEntry, zone = activeZoneContext, options = {}) {
     if (effectRequestInFlight.current || effectResolutionInFlight.current || effectSelection) return
     if (!entry || !zone) {
       setError('Place the card in a zone before activating one of its effects.')
@@ -3956,11 +4011,13 @@ export default function App() {
     const card = entry?.card ?? selected
     if (!card) return
     const resolvedEntry = entry ?? { instanceId: `card-${card.id ?? card.name}`, card, moveReason: 'selected' }
-    const effects = unusedEffectOptions(resolvedEntry, cardEffectOptions(card, zone, resolvedEntry), activatedEffects).map(effect => (
-      zone === 'hand' && isSpellTrapCard(card)
-        ? { ...effect, sourceZone: 'Hand' }
-        : effect
-    ))
+    const effects = unusedEffectOptions(resolvedEntry, cardEffectOptions(card, zone, resolvedEntry), activatedEffects)
+        .map(effect => (
+          zone === 'hand' && isSpellTrapCard(card)
+            ? { ...effect, sourceZone: 'Hand' }
+            : effect
+        ))
+        .filter(effect => !options.selfSpecialSummonOnly || specialSummonsSelfFromZone(effect.text, zone))
     if (effects.length === 0) {
       setEffectSelection(null)
       setError(`${card.name} has no unused effect that can be activated from ${displayZoneName(zone)}.`)
@@ -4943,6 +5000,20 @@ export default function App() {
               request?.onConfirm(entries)
             }}
             onCancel={() => setTributeSummonRequest(null)}
+        />
+        <SummonMethodPicker
+            request={summonMethodRequest}
+            onNormalSummon={() => {
+              const request = summonMethodRequest
+              setSummonMethodRequest(null)
+              request?.onNormalSummon()
+            }}
+            onSpecialSummon={() => {
+              const request = summonMethodRequest
+              setSummonMethodRequest(null)
+              request?.onSpecialSummon()
+            }}
+            onCancel={() => setSummonMethodRequest(null)}
         />
         <EffectPicker
             selection={effectSelection}

@@ -916,6 +916,34 @@ class YugiohServiceTest {
     }
 
     @Test
+    void selfSpecialSummonRequiresAnEmptyMonsterFieldWhenPrinted() {
+        String effect = "If you control no monsters: You can Special Summon this card (from your hand).";
+        Card extender = card(1, "Test Hand Extender", effect, "Effect Monster", "Test");
+        Card controlledMonster = card(2, "Test Controlled Monster", "A monster.", "Effect Monster", "Test");
+        when(repository.getCardByName(extender.getName())).thenReturn(extender);
+
+        ComboService.EffectPrerequisiteResult available = service.checkEffectPrerequisites(
+                new ComboService.EffectPrerequisiteRequest(
+                        extender.getName(), effect, "hand",
+                        Map.of("hand", List.of(extender.getName()), "monsterZone", List.of())));
+        ComboService.EffectPrerequisiteResult blockedByMainZone = service.checkEffectPrerequisites(
+                new ComboService.EffectPrerequisiteRequest(
+                        extender.getName(), effect, "hand",
+                        Map.of("hand", List.of(extender.getName()),
+                                "monsterZone", List.of(controlledMonster.getName()))));
+        ComboService.EffectPrerequisiteResult blockedByExtraZone = service.checkEffectPrerequisites(
+                new ComboService.EffectPrerequisiteRequest(
+                        extender.getName(), effect, "hand",
+                        Map.of("hand", List.of(extender.getName()),
+                                "extraMonsterZone", List.of(controlledMonster.getName()))));
+
+        assertTrue(available.available());
+        assertFalse(blockedByMainZone.available());
+        assertFalse(blockedByExtraZone.available());
+        assertTrue(blockedByMainZone.reason().contains("control no monsters"));
+    }
+
+    @Test
     void elegantEgotistRequiresHarpieLadyInOneOfTheFourFieldZones() {
         String effect = "If \"Harpie Lady\" is on the field: Special Summon 1 \"Harpie Lady\" "
                 + "or \"Harpie Lady Sisters\" from your hand or Deck.";

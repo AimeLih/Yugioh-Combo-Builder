@@ -2,7 +2,9 @@ function usesThisCardFromHand(text) {
   const lower = text.toLowerCase()
   return /\bdiscard this card\b/.test(lower)
       || /\bthis card (?:is|was) in your hand\b/.test(lower)
-      || /\b(?:reveal|send|special summon|normal summon|activate) this card (?:in|from) your hand\b/.test(lower)
+      || /\b(?:reveal|send|special summon|normal summon|activate) this card(?:\s*\([^)]*\))? (?:in|from) your hand\b/.test(lower)
+      || /\bspecial summon this card\s*\(\s*from your hand\s*\)/.test(lower)
+      || /\b(?:must (?:first )?be|can be) special summoned\s*\(\s*from your hand\s*\)/.test(lower)
       || /\bthis card from your hand\b/.test(lower)
       || /\bwhile this card is in your hand\b/.test(lower)
 }

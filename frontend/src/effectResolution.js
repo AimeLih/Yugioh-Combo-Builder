@@ -128,8 +128,11 @@ export function genericDiscardRequirement(effectText) {
 }
 
 export function specialSummonsSelfFromZone(effectText, zone) {
-  return ['hand', 'spellTrapZone'].includes(zone)
-      && /\bspecial summon this card\b/i.test(effectText || '')
+  const text = effectText || ''
+  if (!['hand', 'spellTrapZone'].includes(zone)) return false
+  if (/\bspecial summon this card\b/i.test(text)) return true
+  return zone === 'hand'
+      && /\b(?:must (?:first )?be|can be) special summoned\s*\(\s*from your hand\s*\)/i.test(text)
 }
 
 export function isSpellTrapCard(card) {

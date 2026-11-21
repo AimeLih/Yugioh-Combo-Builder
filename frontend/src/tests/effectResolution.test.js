@@ -103,6 +103,17 @@ test('a hand effect that says Special Summon this card moves its source, not ano
   assert.equal(specialSummonsSelfFromZone(pharaohEffect, 'monsterZone'), false)
 })
 
+test('parenthesized hand self-summons work regardless of the monster Level', () => {
+  const effect = 'If you control no monsters: You can Special Summon this card (from your hand).'
+  assert.equal(specialSummonsSelfFromZone(effect, 'hand'), true)
+  assert.equal(specialSummonsSelfFromZone(effect, 'monsterZone'), false)
+})
+
+test('inherent Special Summon procedures from the hand move the source card', () => {
+  const effect = 'Must first be Special Summoned (from your hand) by banishing 1 LIGHT monster from your GY.'
+  assert.equal(specialSummonsSelfFromZone(effect, 'hand'), true)
+})
+
 test('an ordinary summon effect does not move its source card', () => {
   assert.equal(
       specialSummonsSelfFromZone('Special Summon 1 monster that mentions "Dark Magician".', 'hand'),

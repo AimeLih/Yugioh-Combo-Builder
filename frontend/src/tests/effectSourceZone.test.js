@@ -32,3 +32,17 @@ test('an effect that moves this card from the Graveyard remains a Graveyard effe
 
   assert.equal(effectSourceZone(effect, card), 'Graveyard')
 })
+
+test('a parenthesized self-Special-Summon is available from the Hand', () => {
+  const card = { name: 'Test Self Summoner', type: 'Effect Monster' }
+  const effect = 'If you control no monsters: You can Special Summon this card (from your hand).'
+
+  assert.equal(effectSourceZone(effect, card), 'Hand')
+})
+
+test('an inherent hand Special Summon procedure is available from the Hand', () => {
+  const card = { name: 'Test Procedure Monster', type: 'Effect Monster' }
+  const effect = 'Must first be Special Summoned (from your hand) by banishing 1 LIGHT monster from your GY.'
+
+  assert.equal(effectSourceZone(effect, card), 'Hand')
+})

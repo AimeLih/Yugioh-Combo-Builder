@@ -620,6 +620,24 @@ final class ComboEngine {
         String lowerPayment = safeLower(paymentClause);
         List<String> hand = zones.getOrDefault("hand", Collections.emptyList());
 
+        Matcher controlsNoMonsters = Pattern.compile(
+                "if\\s+you control no monsters(?:\\s+in your Main Monster Zone)?",
+                Pattern.CASE_INSENSITIVE)
+                .matcher(costClause);
+        if (controlsNoMonsters.find()) {
+            boolean mainMonsterZoneOnly = safeLower(controlsNoMonsters.group())
+                    .contains("main monster zone");
+            int controlledMonsterCount = zones.getOrDefault("monsterZone", Collections.emptyList()).size();
+            if (!mainMonsterZoneOnly) {
+                controlledMonsterCount += zones.getOrDefault("extraMonsterZone", Collections.emptyList()).size();
+            }
+            if (controlledMonsterCount > 0) {
+                return mainMonsterZoneOnly
+                        ? "This effect requires your Main Monster Zones to be empty."
+                        : "This effect requires you to control no monsters.";
+            }
+        }
+
         Matcher controlsNamedCard = Pattern.compile(
                 "if you control (?:an? )?\"([^\"]+)\"(\\s+monsters?)?",
                 Pattern.CASE_INSENSITIVE)
