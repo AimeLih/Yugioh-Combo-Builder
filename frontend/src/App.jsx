@@ -255,8 +255,9 @@ function allowedByPendulumScaleEffects(entry, zones) {
     const quotedFamilies = [...restriction.matchAll(/"([^"]+)"/g)].map(match => match[1].toLowerCase())
     if (quotedFamilies.length === 0) return true
     const name = (entry.card.name || '').toLowerCase()
-    const archetype = (entry.card.archetype || '').toLowerCase()
-    return quotedFamilies.some(family => name.includes(family) || archetype.includes(family))
+    const archetypes = (entry.card.archetypes || []).map(archetype => archetype.toLowerCase())
+    return quotedFamilies.some(family =>
+      name.includes(family) || archetypes.some(archetype => archetype.includes(family)))
   })
 }
 
@@ -327,7 +328,7 @@ function matchesMaterialDescriptor(entry, descriptor) {
   const race = (card.race || '').toLowerCase()
   const attribute = (card.attribute || '').toLowerCase()
   const name = (card.name || '').toLowerCase()
-  const archetype = (card.archetype || '').toLowerCase()
+  const archetypes = (card.archetypes || []).map(archetype => archetype.toLowerCase())
 
   const requiredLevels = [...rule.matchAll(/\blevel\s+(\d+)\b/g)]
       .map(match => Number(match[1]))
@@ -356,7 +357,8 @@ function matchesMaterialDescriptor(entry, descriptor) {
 
   const quotedRequirements = [...descriptor.matchAll(/"([^"]+)"/g)].map(match => match[1].toLowerCase())
   if (quotedRequirements.length > 0
-      && !quotedRequirements.some(required => name.includes(required) || archetype.includes(required))) {
+      && !quotedRequirements.some(required =>
+        name.includes(required) || archetypes.some(archetype => archetype.includes(required)))) {
     return false
   }
   return isMonsterCard(card)
@@ -2092,7 +2094,7 @@ function SummonTargetPicker({
     return [
       option.card.name,
       option.card.type,
-      option.card.archetype,
+      ...(option.card.archetypes || []),
       option.label,
       option.reason,
       option.cost,
@@ -2378,8 +2380,8 @@ function CardDetail({
                   </>
               )}
 
-              {card.archetype && (
-                  <WikiRow label="Archetype">{card.archetype}</WikiRow>
+              {card.archetypes?.length > 0 && (
+                  <WikiRow label="Archetypes">{card.archetypes.join(', ')}</WikiRow>
               )}
 
               {hasBadges && (
