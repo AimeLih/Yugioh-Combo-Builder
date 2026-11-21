@@ -535,7 +535,7 @@ class YugiohServiceTest {
         when(paymentView.getName()).thenReturn(payment.getName());
         when(paymentView.getType()).thenReturn(payment.getType());
         when(paymentView.getArchetype()).thenReturn(payment.getArchetype());
-        when(repository.findAllProjectedBy()).thenReturn(List.of(paymentView));
+        when(repository.findCostCandidatesByTypeAndRace(null, null)).thenReturn(List.of(paymentView));
 
         ComboService.FusionMaterialPlan plan =
                 service.getCardCostPlan(source.getName(), target.getName(), null);
@@ -575,12 +575,18 @@ class YugiohServiceTest {
 
         assertEquals(List.of(swordsoulCard.getName(), wyrmCard.getName()),
                 plan.slots().get(0).eligibleCards().stream().map(ComboService.MaterialCardOption::name).toList());
-        verify(repository, never()).findAllProjectedBy();
+        verify(repository, never()).findCostCandidatesByTypeAndRace(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any());
+        verify(repository, never()).findCostCandidatesByQuotedTerm(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any());
     }
 
     @Test
-    void deckCostUsesTheFullCatalogAndHonorsPrintedExclusions() {
-        String effect = "You can banish 1 \"Kashtira\" card from your Deck, except \"Kashtira Riseheart\"; "
+    void deckCostUsesIndexedQuotedMonsterCandidatesAndHonorsPrintedExclusions() {
+        String effect = "You can banish 1 \"Kashtira\" monster from your Deck, except \"Kashtira Riseheart\"; "
                 + "banish the top 3 cards of your opponent's Deck face-down, and if you banish any, "
                 + "this card's Level becomes 7.";
         Card riseheart = card(1, "Kashtira Riseheart", effect,
@@ -600,7 +606,8 @@ class YugiohServiceTest {
         when(targetView.getName()).thenReturn(target.getName());
         when(targetView.getType()).thenReturn(target.getType());
         when(targetView.getArchetype()).thenReturn(target.getArchetype());
-        when(repository.findAllProjectedBy()).thenReturn(List.of(riseheartView, targetView));
+        when(repository.findCostCandidatesByQuotedTerm("monster", null, "kashtira"))
+                .thenReturn(List.of(riseheartView, targetView));
 
         ComboService.FusionMaterialPlan plan = service.getCardCostPlan(
                 riseheart.getName(), target.getName(), effect);
@@ -611,6 +618,69 @@ class YugiohServiceTest {
                 plan.slots().get(0).eligibleCards().stream()
                         .map(ComboService.MaterialCardOption::name).toList());
         verify(repository, never()).findAllByNameIn(org.mockito.ArgumentMatchers.anyCollection());
+        verify(repository).findCostCandidatesByQuotedTerm("monster", null, "kashtira");
+    }
+
+    @Test
+    void deckCostPushesMonsterRaceRequirementIntoTheDatabaseQuery() {
+        String effect = "You can send 1 Dragon monster from your Deck to the GY; draw 1 card.";
+        Card source = card(1, "Dragon Starter", effect, "Spell Card", null);
+        Card target = card(2, "Draw Target", "A target.", "Effect Monster", null);
+        Card dragon = card(3, "Database Dragon", "A Dragon.", "Effect Monster", null);
+        dragon.setRace("Dragon");
+        CardRepository.CostCardView dragonView = mock(CardRepository.CostCardView.class);
+
+        when(repository.getCardByName(source.getName())).thenReturn(source);
+        when(repository.getCardByName(target.getName())).thenReturn(target);
+        when(dragonView.getId()).thenReturn(dragon.getId());
+        when(dragonView.getName()).thenReturn(dragon.getName());
+        when(dragonView.getType()).thenReturn(dragon.getType());
+        when(dragonView.getArchetype()).thenReturn(dragon.getArchetype());
+        when(dragonView.getRace()).thenReturn(dragon.getRace());
+        when(repository.findCostCandidatesByTypeAndRace("monster", "dragon"))
+                .thenReturn(List.of(dragonView));
+
+        ComboService.FusionMaterialPlan plan = service.getCardCostPlan(
+                source.getName(), target.getName(), effect);
+
+        assertEquals(List.of(dragon.getName()),
+                plan.slots().get(0).eligibleCards().stream()
+                        .map(ComboService.MaterialCardOption::name).toList());
+        verify(repository).findCostCandidatesByTypeAndRace("monster", "dragon");
+    }
+
+    @Test
+    void deckCostQueriesAndMergesEachAlternativeRequirement() {
+        String effect = "You can banish 1 \"Kashtira\" card or 1 Dragon monster from your Deck; draw 1 card.";
+        Card source = card(1, "Alternative Starter", effect, "Spell Card", null);
+        Card target = card(2, "Draw Target", "A target.", "Effect Monster", null);
+        CardRepository.CostCardView kashtiraView = mock(CardRepository.CostCardView.class);
+        CardRepository.CostCardView dragonView = mock(CardRepository.CostCardView.class);
+
+        when(repository.getCardByName(source.getName())).thenReturn(source);
+        when(repository.getCardByName(target.getName())).thenReturn(target);
+        when(kashtiraView.getId()).thenReturn(3L);
+        when(kashtiraView.getName()).thenReturn("Kashtira Fenrir");
+        when(kashtiraView.getType()).thenReturn("Effect Monster");
+        when(kashtiraView.getArchetype()).thenReturn("Kashtira");
+        when(kashtiraView.getRace()).thenReturn("Psychic");
+        when(dragonView.getId()).thenReturn(4L);
+        when(dragonView.getName()).thenReturn("Database Dragon");
+        when(dragonView.getType()).thenReturn("Effect Monster");
+        when(dragonView.getRace()).thenReturn("Dragon");
+        when(repository.findCostCandidatesByQuotedTerm(null, null, "kashtira"))
+                .thenReturn(List.of(kashtiraView));
+        when(repository.findCostCandidatesByTypeAndRace("monster", "dragon"))
+                .thenReturn(List.of(dragonView));
+
+        ComboService.FusionMaterialPlan plan = service.getCardCostPlan(
+                source.getName(), target.getName(), effect);
+
+        assertEquals(List.of("Database Dragon", "Kashtira Fenrir"),
+                plan.slots().get(0).eligibleCards().stream()
+                        .map(ComboService.MaterialCardOption::name).toList());
+        verify(repository).findCostCandidatesByQuotedTerm(null, null, "kashtira");
+        verify(repository).findCostCandidatesByTypeAndRace("monster", "dragon");
     }
 
     @Test
@@ -1024,6 +1094,49 @@ class YugiohServiceTest {
         assertEquals(List.of("Top", "Bottom-Left", "Bottom-Right"), savedCard.getLinkmarkers());
         assertEquals("https://example.com/new-link.jpg", savedCard.getCardImageUrl());
         assertTrue(savedCard.isStaple());
+    }
+
+    @Test
+    void referenceResolutionAddsEveryArchetypeFoundInTheCardName() {
+        CardTypeRepository typeRepository = mock(CardTypeRepository.class);
+        CardRaceRepository raceRepository = mock(CardRaceRepository.class);
+        CardAttributeRepository attributeRepository = mock(CardAttributeRepository.class);
+        ArchetypeRepository archetypeRepository = mock(ArchetypeRepository.class);
+        CardReferenceDataService referenceService = new CardReferenceDataService(
+                typeRepository, raceRepository, attributeRepository, archetypeRepository);
+        Card card = card(1, "Kashtira Scareclaw", "A monster.", "Effect Monster", "Kashtira");
+        CardType effectMonster = new CardType("Effect Monster");
+        Archetype kashtira = new Archetype("Kashtira");
+        Archetype scareclaw = new Archetype("Scareclaw");
+
+        when(typeRepository.findByNameIn(org.mockito.ArgumentMatchers.anyCollection()))
+                .thenReturn(List.of(effectMonster));
+        when(archetypeRepository.findByNameIn(org.mockito.ArgumentMatchers.anyCollection()))
+                .thenReturn(List.of(kashtira));
+        when(archetypeRepository.findAllByOrderByNameAsc())
+                .thenReturn(List.of(kashtira, scareclaw));
+
+        referenceService.resolveReferences(List.of(card));
+
+        assertEquals(List.of("Kashtira", "Scareclaw"), card.getArchetypes());
+    }
+
+    @Test
+    void shortArchetypeInferenceRequiresTokenBoundaries() {
+        assertFalse(CardReferenceDataService.cardNameMatchesArchetype("Traptrix Myrmeleo", "Ra"));
+        assertFalse(CardReferenceDataService.cardNameMatchesArchetype("Supreme King Dragon", "P"));
+        assertTrue(CardReferenceDataService.cardNameMatchesArchetype("The Winged Dragon of Ra", "Ra"));
+        assertTrue(CardReferenceDataService.cardNameMatchesArchetype("P.U.N.K. Ze Amin", "P"));
+    }
+
+    @Test
+    void archetypeInferenceMatchesCompleteNamePartsOnly() {
+        assertFalse(CardReferenceDataService.cardNameMatchesArchetype(
+                "Raidraptor - Revolution Falcon - Air Raid", "Evol"));
+        assertFalse(CardReferenceDataService.cardNameMatchesArchetype("Evoltile Megachirella", "Evol"));
+        assertTrue(CardReferenceDataService.cardNameMatchesArchetype("Kashtira Scareclaw", "Scareclaw"));
+        assertTrue(CardReferenceDataService.cardNameMatchesArchetype(
+                "Dark Magician Girl", "Dark Magician"));
     }
 
     private void stubRelatedCards(Card source, List<Card> related) {
