@@ -3,7 +3,8 @@ export function effectNeedsPrerequisiteCheck(effectText) {
   const semicolonIndex = text.indexOf(';')
   const costClause = semicolonIndex >= 0 ? text.slice(0, semicolonIndex) : ''
   const conditionClause = semicolonIndex >= 0 ? costClause : text.split(/[.]/, 1)[0]
-  return /\b(?:discard|tribute|reveal)\b/i.test(costClause)
+  return /\b(?:discard|tribute|reveal|send|banish|destroy|shuffle)\b/i.test(costClause)
+      || /\btarget\s+(?:up to\s+)?(?:\d+|a|an|one|two|three|four|five)\b[^.;]*?\b(?:in|from)\s+(?:your|the)\s+(?:GY|Graveyard|hand|banished cards?)\b/i.test(text)
       || /\bif you control\b/i.test(conditionClause)
       || /\bif\b[^:;.]*\bon (?:your|the) field\b/i.test(conditionClause)
       || /\blevel\s+\d+\s+or higher monster(?:\(s\)|s?) (?:you controlled|under your control) (?:was|were) sent (?:from (?:your|the) field )?to (?:(?:your|the) )?(?:gy|graveyard) this turn\b/i.test(text)
@@ -72,6 +73,58 @@ export function effectSearchRequirement(effectText) {
 
 export function effectTargetRequirement(effectText) {
   const text = effectText || ''
+  const controlledCost = text.match(
+      /\b(send|banish|destroy)\s+(up to\s+)?(\d+|a|an|one|two|three|four|five)\s+(face-up\s+)?(?:"([^"]+)"\s+)?(cards?|monsters?|spells?|traps?)\s+you control\s+(?:to\s+(?:the|your)\s+(GY|Graveyard)|face-up)?(?=\s*;|[.])/i,
+  )
+  if (controlledCost) {
+    const count = effectNumber(controlledCost[3])
+    return {
+      action: controlledCost[1].toLowerCase(),
+      count,
+      min: controlledCost[2] ? 1 : count,
+      max: count,
+      family: controlledCost[5] || '',
+      kind: controlledCost[6].replace(/s$/i, '').toLowerCase(),
+      subtype: '',
+      sources: ['field'],
+      excludedNames: [...text.matchAll(/\bexcept\s+"([^"]+)"/gi)].map(exclusion => exclusion[1]),
+      phase: 'cost',
+      faceUp: Boolean(controlledCost[4]),
+      atkChange: 0,
+    }
+  }
+
+  const graveyardTarget = text.match(
+      /\btarget\s+(up to\s+)?(\d+|a|an|one|two|three|four|five)\s+(?:face-up\s+)?(?:"([^"]+)"\s+)?(?:(Fusion|Synchro|Xyz|Link)\s+)?(cards?|monsters?|spells?|traps?)\s+in\s+(?:your|the)\s+(GY|Graveyard|hand|banished cards?)(?=\s*;|[,.])/i,
+  )
+  if (graveyardTarget) {
+    const count = effectNumber(graveyardTarget[2])
+    const resolutionClause = text.slice(graveyardTarget.index + graveyardTarget[0].length)
+    const action = /\bspecial summon\s+(?:it|them|that)/i.test(resolutionClause)
+      ? 'special summon'
+      : /\badd\s+(?:it|them|that)\s+to\s+(?:your|the)\s+hand/i.test(resolutionClause)
+        ? 'add'
+        : /\bbanish\s+(?:it|them|that)/i.test(resolutionClause) ? 'banish' : 'target'
+    const source = /\b(?:GY|Graveyard)\b/i.test(graveyardTarget[6])
+      ? 'graveyard'
+      : /\bhand\b/i.test(graveyardTarget[6]) ? 'hand' : 'banished'
+    const atkLoss = resolutionClause.match(/\b(?:it|they) loses?\s+(\d+)\s+ATK\b/i)
+    return {
+      action,
+      count,
+      min: graveyardTarget[1] ? 1 : count,
+      max: count,
+      family: graveyardTarget[3] || '',
+      kind: graveyardTarget[5].replace(/s$/i, '').toLowerCase(),
+      subtype: (graveyardTarget[4] || '').toLowerCase(),
+      sources: [source],
+      excludedNames: [...text.matchAll(/\bexcept\s+"([^"]+)"/gi)].map(exclusion => exclusion[1]),
+      phase: 'target',
+      faceUp: false,
+      atkChange: atkLoss ? -Number(atkLoss[1]) : 0,
+    }
+  }
+
   const match = text.match(
       /\b(place|set|special summon|send|banish|attach|return|shuffle|add)\b[^.;]*?\b(up to\s+)?(\d+|a|an|one|two|three|four|five)\s+(?:"([^"]+)"\s+)?(cards?|monsters?|spells?|traps?)\s+from\s+(?:your|the)\s+(.+?)(?=,\s*(?:except|then|in|to)\b|\s+to\s+(?:your|the)\b|[;.]|$)/i,
   )
@@ -95,9 +148,48 @@ export function effectTargetRequirement(effectText) {
     max: count,
     family: match[4] || '',
     kind: match[5].replace(/s$/i, '').toLowerCase(),
+    subtype: '',
     sources,
     excludedNames: [...text.matchAll(/\bexcept\s+"([^"]+)"/gi)].map(exclusion => exclusion[1]),
+    phase: 'resolution',
+    faceUp: false,
+    atkChange: 0,
   }
+}
+
+export function matchesEffectTargetRequirement(card, requirement) {
+  if (!card || !requirement) return false
+  const type = (card.type || '').toLowerCase()
+  if (requirement.kind === 'monster' && !type.includes('monster')) return false
+  if (requirement.kind === 'spell' && !type.includes('spell')) return false
+  if (requirement.kind === 'trap' && !type.includes('trap')) return false
+  if (requirement.subtype && !type.includes(requirement.subtype)) return false
+  if (!requirement.family) return true
+  const family = requirement.family.toLowerCase()
+  return (card.name || '').toLowerCase().includes(family)
+      || (card.archetypes || []).some(archetype => archetype.toLowerCase().includes(family))
+}
+
+export function currentEffectRequirementFailure(effectText, zones, sourceEntryId = null) {
+  const requirement = effectTargetRequirement(effectText)
+  if (!requirement || requirement.sources.some(source => ['deck', 'extraDeck'].includes(source))) return ''
+  const sourceZones = []
+  if (requirement.sources.includes('hand')) sourceZones.push('hand')
+  if (requirement.sources.includes('graveyard')) sourceZones.push('graveyard')
+  if (requirement.sources.includes('banished')) sourceZones.push('banished')
+  if (requirement.sources.includes('field')) {
+    sourceZones.push('monsterZone', 'extraMonsterZone', 'spellTrapZone', 'fieldZone', 'pendulumZone')
+  }
+  const excluded = new Set(requirement.excludedNames.map(name => name.toLowerCase()))
+  const available = sourceZones.flatMap(zone => zones?.[zone] || [])
+      .filter(entry => entry.instanceId !== sourceEntryId)
+      .filter(entry => !excluded.has((entry.card?.name || '').toLowerCase()))
+      .filter(entry => matchesEffectTargetRequirement(entry.card, requirement))
+  if (available.length >= requirement.min) return ''
+  const family = requirement.family ? ` “${requirement.family}”` : ''
+  const subtype = requirement.subtype ? ` ${requirement.subtype}` : ''
+  const location = requirement.sources.includes('field') ? 'you control' : `in your ${requirement.sources[0]}`
+  return `This effect requires ${requirement.min}${family}${subtype} ${requirement.kind}${requirement.min === 1 ? '' : 's'} ${location}.`
 }
 
 export function tokenSummonRequirement(effectText) {

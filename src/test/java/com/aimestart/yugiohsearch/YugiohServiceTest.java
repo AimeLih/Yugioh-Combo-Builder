@@ -64,6 +64,32 @@ class YugiohServiceTest {
     }
 
     @Test
+    void controlledArchetypeSendCostMustExistBeforeSelfSummonActivation() {
+        String effect = "You can send 1 face-up \"Centur-Ion\" card you control to the GY; "
+                + "Special Summon this card from your hand.";
+        Card gargoyle = card(1, "Centur-Ion Gargoyle II", effect, "Effect Monster", "Centur-Ion");
+        Card trudea = card(2, "Centur-Ion Trudea", "A Centur-Ion monster.", "Effect Monster", "Centur-Ion");
+        when(repository.getCardByName(gargoyle.getName())).thenReturn(gargoyle);
+        when(repository.findAllByNameIn(org.mockito.ArgumentMatchers.anyCollection()))
+                .thenAnswer(invocation -> {
+                    java.util.Collection<String> names = invocation.getArgument(0);
+                    return names.contains(trudea.getName()) ? List.of(trudea) : List.of();
+                });
+
+        ComboService.EffectPrerequisiteResult unavailable = service.checkEffectPrerequisites(
+                new ComboService.EffectPrerequisiteRequest(
+                        gargoyle.getName(), effect, "hand", Map.of("hand", List.of(gargoyle.getName()))));
+        ComboService.EffectPrerequisiteResult available = service.checkEffectPrerequisites(
+                new ComboService.EffectPrerequisiteRequest(
+                        gargoyle.getName(), effect, "hand",
+                        Map.of("hand", List.of(gargoyle.getName()), "spellTrapZone", List.of(trudea.getName()))));
+
+        assertFalse(unavailable.available());
+        assertTrue(unavailable.reason().contains("face-up"));
+        assertTrue(available.available());
+    }
+
+    @Test
     void discardAfterMultiCardSearchIsResolutionInsteadOfActivationCost() {
         String effect = "When this card is activated: Add 2 \"Exosister\" monsters from your Deck "
                 + "to your hand, then discard 1 card.";

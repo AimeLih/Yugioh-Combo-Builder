@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   coinTossRequirement,
+  currentEffectRequirementFailure,
   effectSearchRequirement,
   effectTargetRequirement,
   effectNeedsPrerequisiteCheck,
@@ -12,6 +13,7 @@ import {
   isEffectSearchCandidate,
   isFieldSpell,
   isSpellTrapCard,
+  matchesEffectTargetRequirement,
   placeFieldSpell,
   selfCostDestination,
   specialSummonsSelfFromZone,
@@ -84,8 +86,12 @@ test('direct effect targets are parsed independently from combo recommendations'
     max: 1,
     family: 'Centur-Ion',
     kind: 'monster',
+    subtype: '',
     sources: ['hand', 'deck'],
     excludedNames: ['Centur-Ion Trudea'],
+    phase: 'resolution',
+    faceUp: false,
+    atkChange: 0,
   })
 })
 
@@ -127,9 +133,76 @@ test('a Graveyard self-banish cost moves the activating card, not its resolution
     max: 1,
     family: 'Centur-Ion',
     kind: 'card',
+    subtype: '',
     sources: ['deck'],
     excludedNames: ['Wake Up Centur-Ion!'],
+    phase: 'resolution',
+    faceUp: false,
+    atkChange: 0,
   })
+})
+
+test('controlled face-up archetype cards are selected as activation costs', () => {
+  const effect = 'You can send 1 face-up "Centur-Ion" card you control to the GY; Special Summon this card from your hand.'
+  const requirement = effectTargetRequirement(effect)
+
+  assert.equal(effectNeedsPrerequisiteCheck(effect), true)
+  assert.deepEqual(requirement, {
+    action: 'send',
+    count: 1,
+    min: 1,
+    max: 1,
+    family: 'Centur-Ion',
+    kind: 'card',
+    subtype: '',
+    sources: ['field'],
+    excludedNames: [],
+    phase: 'cost',
+    faceUp: true,
+    atkChange: 0,
+  })
+  const zones = {
+    monsterZone: [],
+    extraMonsterZone: [],
+    spellTrapZone: [],
+    fieldZone: [],
+    pendulumZone: [],
+  }
+  assert.match(currentEffectRequirementFailure(effect, zones), /requires 1/)
+  zones.spellTrapZone.push({
+    instanceId: 'trudea',
+    card: { name: 'Centur-Ion Trudea', type: 'Effect Monster', archetypes: ['Centur-Ion'] },
+  })
+  assert.equal(currentEffectRequirementFailure(effect, zones), '')
+})
+
+test('graveyard archetype Synchro targets are available without combo recommendations', () => {
+  const effect = 'You can banish this card from your GY, then target 1 "Centur-Ion" Synchro Monster in your GY; Special Summon it, but it loses 1500 ATK.'
+  const requirement = effectTargetRequirement(effect)
+  const auxila = { name: 'Centur-Ion Auxila', type: 'Synchro Monster', archetypes: ['Centur-Ion'] }
+
+  assert.equal(effectNeedsPrerequisiteCheck(effect), true)
+  assert.equal(selfCostDestination(effect, 'graveyard'), 'banished')
+  assert.deepEqual(requirement, {
+    action: 'special summon',
+    count: 1,
+    min: 1,
+    max: 1,
+    family: 'Centur-Ion',
+    kind: 'monster',
+    subtype: 'synchro',
+    sources: ['graveyard'],
+    excludedNames: [],
+    phase: 'target',
+    faceUp: false,
+    atkChange: -1500,
+  })
+  assert.equal(matchesEffectTargetRequirement(auxila, requirement), true)
+  assert.match(currentEffectRequirementFailure(effect, { graveyard: [] }, 'phalanx'), /requires 1/)
+  assert.equal(currentEffectRequirementFailure(effect, {
+    graveyard: [{ instanceId: 'phalanx', card: { name: 'Centur-Ion Phalanx', type: 'Trap Card' } },
+      { instanceId: 'auxila', card: auxila }],
+  }, 'phalanx'), '')
 })
 
 test('a hand effect that says Special Summon this card moves its source, not another monster', () => {

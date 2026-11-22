@@ -4,6 +4,7 @@ import { activationSummonRestrictions, summonRestrictionReason } from './summonR
 import { effectSourceZone } from './effectSourceZone.js'
 import {
   coinTossRequirement,
+  currentEffectRequirementFailure,
   effectSearchRequirement,
   effectTargetRequirement,
   effectNeedsPrerequisiteCheck,
@@ -12,6 +13,7 @@ import {
   isEffectSearchCandidate,
   isFieldSpell,
   isSpellTrapCard,
+  matchesEffectTargetRequirement,
   placeFieldSpell,
   selfCostDestination,
   specialSummonsSelfFromZone,
@@ -499,6 +501,20 @@ function effectTargetCurrentZones(requirement) {
   if (requirement.sources.includes('extraDeck')) zones.push('extraDeck')
   if (requirement.sources.includes('field')) zones.push(...MONSTER_FIELD_ZONES, 'spellTrapZone', 'fieldZone', 'pendulumZone')
   return [...new Set(zones)]
+}
+
+function effectRequirementDestination(requirement, effectText) {
+  if (requirement.action === 'special summon') return 'Special Summon to Monster Zone'
+  if (requirement.action === 'send') return 'Send to GY'
+  if (requirement.action === 'banish') return 'Banish'
+  if (requirement.action === 'add') return 'Add to Hand'
+  const text = effectText || ''
+  if (/spell\s*&\s*trap zones? as face-up continuous traps?/i.test(text)) {
+    return 'Place in Spell & Trap Zone as face-up Continuous Trap'
+  }
+  if (/spell\s*&\s*trap zones?/i.test(text)) return 'Place in Spell & Trap Zone'
+  if (/field zone/i.test(text)) return 'Place in Field Zone'
+  return requirement.action
 }
 
 function normalizeEffectText(text) {
@@ -1509,8 +1525,8 @@ function EffectResolutionPicker({ request, hand, onConfirm, onCancel }) {
 
           {targetRequirement && (
             <section className="effect-resolution-step">
-              <h4>{searchRequirement ? '2' : '1'}. Choose {targetRequirement.min === targetRequirement.max ? targetRequirement.max : `up to ${targetRequirement.max}`} effect target{targetRequirement.max === 1 ? '' : 's'}</h4>
-              <p className="xyz-detach-copy">Choose the card and its printed source location. This selection resolves independently from Build Combo.</p>
+              <h4>{searchRequirement ? '2' : '1'}. Choose {targetRequirement.min === targetRequirement.max ? targetRequirement.max : `up to ${targetRequirement.max}`} {targetRequirement.phase === 'cost' ? 'activation cost' : 'effect target'}{targetRequirement.max === 1 ? '' : 's'}</h4>
+              <p className="xyz-detach-copy">Choose the card and its printed source location. {targetRequirement.phase === 'cost' ? 'The cost is paid before the effect resolves.' : 'This selection resolves independently from Build Combo.'}</p>
               <div className="selected-materials">
                 {selectedTargetKeys.map((key, index) => {
                   const option = targetOptions.find(candidate => candidate.selectionKey === key)
@@ -1578,7 +1594,7 @@ function EffectResolutionPicker({ request, hand, onConfirm, onCancel }) {
           )}
 
           <div className="xyz-detach-footer">
-            <span>{tokenRequirement ? `Level ${declaredTokenLevel ?? '—'} declared · ` : ''}{selectedSearchIds.length} searched · {selectedTargetKeys.length} targeted · {discardChoices.length} discarded</span>
+            <span>{tokenRequirement ? `Level ${declaredTokenLevel ?? '—'} declared · ` : ''}{selectedSearchIds.length} searched · {selectedTargetKeys.length} {targetRequirement?.phase === 'cost' ? 'cost selected' : 'targeted'} · {discardChoices.length} discarded</span>
             <button
                 type="button"
                 disabled={!complete}
@@ -4063,14 +4079,15 @@ export default function App() {
       setActiveZoneContext(zone)
       const checkedEffects = await Promise.all(effects.map(async effect => {
         const prerequisite = await effectPrerequisiteResult(card, effect, zone)
+        const stateReason = currentEffectRequirementFailure(effect.text, zones, resolvedEntry.instanceId)
         const materialReason = xyzMaterialCostReason(resolvedEntry, effect.text, zones)
         const linkReason = linkEffectPrerequisiteFailure(resolvedEntry, effect.text, zones)
         return {
           ...effect,
           prerequisitesChecked: true,
           legalSummonTargets: prerequisite.legalSummonTargets,
-          ...(!prerequisite.available || materialReason || linkReason
-            ? { unavailableReason: !prerequisite.available ? prerequisite.reason : materialReason || linkReason }
+          ...(!prerequisite.available || stateReason || materialReason || linkReason
+            ? { unavailableReason: !prerequisite.available ? prerequisite.reason : stateReason || materialReason || linkReason }
             : {}),
         }
       }))
@@ -4136,28 +4153,46 @@ export default function App() {
 
     let targetOptions = []
     if (targetRequirement) {
-      const response = await fetch(
-          `${API}/yugioh/card/combos?name=${encodeURIComponent(sourceCard.name)}&effect=${encodeURIComponent(effect.text)}`,
-      )
-      if (!response.ok) throw new Error('Could not load legal targets for this effect.')
       const excludedNames = new Set(targetRequirement.excludedNames.map(name => name.toLowerCase()))
       const currentSourceZones = effectTargetCurrentZones(targetRequirement)
-      const options = await response.json()
-      targetOptions = (Array.isArray(options) ? options : []).flatMap(option => {
+      const destination = effectRequirementDestination(targetRequirement, effect.text)
+      const usesLiveRequirement = targetRequirement.phase !== 'resolution'
+      const currentOptions = usesLiveRequirement ? currentSourceZones.flatMap(zoneName => zones[zoneName]
+          .filter(candidate => candidate.instanceId !== entry?.instanceId)
+          .filter(candidate => !excludedNames.has((candidate.card?.name || '').toLowerCase()))
+          .filter(candidate => matchesEffectTargetRequirement(candidate.card, targetRequirement))
+          .map(candidate => ({
+            card: candidate.card,
+            destination,
+            reason: targetRequirement.phase === 'cost' ? 'Legal activation cost' : 'Legal effect target',
+            originZone: zoneName,
+            originEntryId: candidate.instanceId,
+            originLabel: displayZoneName(zoneName),
+            selectionKey: `${candidate.card.id ?? candidate.card.name}:${destination}:${zoneName}:${candidate.instanceId}`,
+          }))) : []
+      let remoteOptions = []
+      if (!usesLiveRequirement
+          || targetRequirement.sources.some(source => ['deck', 'extraDeck'].includes(source))) {
+        const response = await fetch(
+            `${API}/yugioh/card/combos?name=${encodeURIComponent(sourceCard.name)}&effect=${encodeURIComponent(effect.text)}`,
+        )
+        if (!response.ok) throw new Error('Could not load legal targets for this effect.')
+        remoteOptions = await response.json()
+      }
+      const virtualOptions = (Array.isArray(remoteOptions) ? remoteOptions : []).flatMap(option => {
           if (excludedNames.has((option.card?.name || '').toLowerCase())) return []
-          const currentEntries = currentSourceZones.flatMap(zoneName =>
+          const located = usesLiveRequirement ? [] : currentSourceZones.flatMap(zoneName =>
             zones[zoneName]
                 .filter(candidate => candidate.instanceId !== entry?.instanceId)
                 .filter(candidate => candidate.card.id === option.card.id
                   || candidate.card.name === option.card.name)
-                .map(candidate => ({ zoneName, candidate })))
-          const located = currentEntries.map(({ zoneName, candidate }) => ({
-            ...option,
-            originZone: zoneName,
-            originEntryId: candidate.instanceId,
-            originLabel: displayZoneName(zoneName),
-            selectionKey: `${option.card.id ?? option.card.name}:${option.destination}:${zoneName}:${candidate.instanceId}`,
-          }))
+                .map(candidate => ({
+                  ...option,
+                  originZone: zoneName,
+                  originEntryId: candidate.instanceId,
+                  originLabel: displayZoneName(zoneName),
+                  selectionKey: `${option.card.id ?? option.card.name}:${option.destination}:${zoneName}:${candidate.instanceId}`,
+                })))
           const virtual = []
           if (targetRequirement.sources.includes('deck')) {
             virtual.push({
@@ -4179,6 +4214,7 @@ export default function App() {
           }
           return [...located, ...virtual]
       })
+      targetOptions = [...currentOptions, ...virtualOptions]
       if (targetOptions.length === 0) throw new Error('No legal cards are currently available for this effect.')
     }
 
@@ -4221,8 +4257,12 @@ export default function App() {
       const currentEntry = option.originEntryId && ZONE_KEYS.includes(option.originZone)
         ? zones[option.originZone].find(candidate => candidate.instanceId === option.originEntryId)
         : null
+      const targetCard = currentEntry?.card ?? option.card
       return {
         ...(currentEntry ?? zoneEntry(option.card, 'effect-target')),
+        card: request.targetRequirement?.atkChange
+          ? { ...targetCard, atk: Math.max(0, Number(targetCard.atk || 0) + request.targetRequirement.atkChange) }
+          : targetCard,
         moveReason: 'effect-resolution',
         treatedAs: effectTargetTreatedAs(option.destination),
         overlayMaterials: [],
@@ -4395,6 +4435,7 @@ export default function App() {
       unavailableReason: prerequisite.available ? '' : prerequisite.reason,
     }
     const unavailableReason = validatedEffect.unavailableReason
+        || currentEffectRequirementFailure(effect.text, zones, liveEntry?.instanceId)
         || linkEffectPrerequisiteFailure(liveEntry, effect.text, zones)
     if (unavailableReason) {
       setEffectSelection(previous => previous ? {

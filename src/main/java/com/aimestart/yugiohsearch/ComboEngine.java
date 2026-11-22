@@ -709,6 +709,38 @@ final class ComboEngine {
             }
         }
 
+        Matcher sendControlledCard = Pattern.compile(
+                "(?:send|banish|destroy)\\s+(\\d+|one|a)\\s+(?:face-up\\s+)?(?:\"([^\"]+)\"\\s+)?"
+                        + "(cards?|monsters?|spells?|traps?)\\s+you control(?:\\s+to\\s+(?:the|your)\\s+(?:GY|Graveyard))?",
+                Pattern.CASE_INSENSITIVE)
+                .matcher(paymentClause);
+        if (sendControlledCard.find()) {
+            int required = wordCount(sendControlledCard.group(1));
+            String family = sendControlledCard.group(2);
+            String kind = safeLower(sendControlledCard.group(3));
+            List<String> controlledNames = fieldCardNames(zones);
+            Map<String, Card> controlledCards = cardsByName(
+                    cardRepository.findAllByNameIn(new LinkedHashSet<>(controlledNames)),
+                    Collections.emptyList());
+            long available = controlledNames.stream()
+                    .map(name -> controlledCards.get(safeLower(name)))
+                    .filter(Objects::nonNull)
+                    .filter(card -> {
+                        String type = safeLower(card.getType());
+                        if (kind.startsWith("monster") && !type.contains("monster")) return false;
+                        if (kind.startsWith("spell") && !type.contains("spell")) return false;
+                        if (kind.startsWith("trap") && !type.contains("trap")) return false;
+                        return family == null || safeLower(card.getName()).contains(safeLower(family))
+                                || hasMatchingArchetype(card, family);
+                    })
+                    .count();
+            if (available < required) {
+                String description = family == null ? kind : "\"" + family + "\" " + kind;
+                return "This effect requires " + required + " face-up " + description
+                        + (required == 1 ? "" : "s") + " you control.";
+            }
+        }
+
         if (lowerPayment.contains("discard this card")) {
             return "hand".equalsIgnoreCase(sourceZone)
                     ? ""
