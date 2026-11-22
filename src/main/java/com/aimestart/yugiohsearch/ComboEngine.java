@@ -1746,6 +1746,13 @@ final class ComboEngine {
             LinkedHashSet<String> reasons = new LinkedHashSet<>();
             LinkedHashSet<String> destinations = new LinkedHashSet<>();
 
+            String deckMovementDestination = directDeckMovementDestination(section.text(), candidate);
+            if (!deckMovementDestination.isBlank()) {
+                score += 110;
+                reasons.add(card.getName() + " can move this legal card from the Deck");
+                destinations.add(deckMovementDestination);
+            }
+
             if (!mentionedCardName.isBlank()
                     && !isExtraDeckMonster(candidate)
                     && safeLower(candidate.getType()).contains("monster")
@@ -1800,7 +1807,9 @@ final class ComboEngine {
                 destinations.add("Monster Zone");
             }
 
-            if (sourceCanRecover && isGraveyardBridgeTarget(candidate, targetDescription)) {
+            if (deckMovementDestination.isBlank()
+                    && sourceCanRecover
+                    && isGraveyardBridgeTarget(candidate, targetDescription)) {
                 score += 55;
                 reasons.add("This card has graveyard recursion that turns setup into follow-up");
                 destinations.add("Graveyard setup");
@@ -1884,9 +1893,12 @@ final class ComboEngine {
             int add = Math.max(clausePrefix.lastIndexOf("add "), clausePrefix.lastIndexOf("add up to"));
             int set = clausePrefix.lastIndexOf("set ");
             int place = clausePrefix.lastIndexOf("place ");
-            int send = Math.max(clausePrefix.lastIndexOf("send "), clausePrefix.lastIndexOf("banish "));
+            int send = clausePrefix.lastIndexOf("send ");
+            int banish = clausePrefix.lastIndexOf("banish ");
             int attach = clausePrefix.lastIndexOf("attach ");
-            int latestAction = Stream.of(summon, add, set, place, send, attach).max(Integer::compareTo).orElse(-1);
+            int latestAction = Stream.of(summon, add, set, place, send, banish, attach)
+                    .max(Integer::compareTo)
+                    .orElse(-1);
 
             if (latestAction >= 0) {
                 if (latestAction == summon) return "Monster Zone";
@@ -1896,7 +1908,7 @@ final class ComboEngine {
                 }
                 if (latestAction == attach) return "Xyz Material";
                 if (latestAction == place) return destinationForEffect(effectText, target);
-                return text.contains("banish") ? "Banished" : "Graveyard";
+                return latestAction == banish ? "Banished" : "Graveyard";
             }
             quoteIndex = text.indexOf(token, quoteIndex + token.length());
         }
@@ -1969,6 +1981,37 @@ final class ComboEngine {
             return true;
         }
         return isExtraDeckMonster(candidate);
+    }
+
+    private String directDeckMovementDestination(String effectText, Card candidate) {
+        Matcher movement = Pattern.compile(
+                "\\b(send|banish|shuffle|destroy)\\s+(?:up to\\s+)?(?:\\d+|one|a)\\s+"
+                        + "(?:\"([^\"]+)\"\\s+)?(cards?|monsters?|spells?|traps?)\\s+"
+                        + "from\\s+(?:your|the)\\s+deck\\b",
+                Pattern.CASE_INSENSITIVE)
+                .matcher(effectText);
+        if (!movement.find() || isExtraDeckMonster(candidate)) {
+            return "";
+        }
+
+        String family = movement.group(2);
+        if (family != null && !family.isBlank()
+                && !safeLower(candidate.getName()).contains(safeLower(family))
+                && !hasMatchingArchetype(candidate, family)) {
+            return "";
+        }
+
+        String type = safeLower(candidate.getType());
+        String kind = safeLower(movement.group(3));
+        if (kind.startsWith("monster") && !type.contains("monster")) return "";
+        if (kind.startsWith("spell") && !type.contains("spell")) return "";
+        if (kind.startsWith("trap") && !type.contains("trap")) return "";
+
+        return switch (safeLower(movement.group(1))) {
+            case "banish" -> "Banished";
+            case "shuffle" -> "Deck";
+            default -> "Graveyard";
+        };
     }
 
     private boolean isStarterCard(Card card) {

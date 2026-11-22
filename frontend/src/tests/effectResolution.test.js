@@ -13,8 +13,10 @@ import {
   isFieldSpell,
   isSpellTrapCard,
   placeFieldSpell,
+  selfCostDestination,
   specialSummonsSelfFromZone,
   spellTrapResolutionZone,
+  tokenSummonRequirement,
 } from '../effectResolution.js'
 
 test('coin toss effects expose the printed toss count', () => {
@@ -96,6 +98,38 @@ test('direct effect targets preserve comma-separated source zones', () => {
       'Special Summon 1 "Example" monster from your hand, Deck, or GY to your field.',
   )
   assert.deepEqual(requirement.sources, ['hand', 'deck', 'graveyard'])
+})
+
+test('declared-Level Token summons expose every printed Level choice', () => {
+  const effect = 'If a Monster Card is face-up in your Spell & Trap Zone: You can declare Level 4 or 8; Special Summon 1 "Centur-Ion Token" (Pyro/DARK/ATK 0/DEF 0) with the declared Level, but it cannot be used as Fusion or Link Material.'
+
+  assert.deepEqual(tokenSummonRequirement(effect), {
+    count: 1,
+    name: 'Centur-Ion Token',
+    race: 'Pyro',
+    attribute: 'DARK',
+    atk: 0,
+    def: 0,
+    level: null,
+    levelChoices: [4, 8],
+  })
+})
+
+test('a Graveyard self-banish cost moves the activating card, not its resolution target', () => {
+  const effect = 'During your Main Phase: You can banish this card from your GY; send 1 "Centur-Ion" card from your Deck to the GY, except "Wake Up Centur-Ion!".'
+
+  assert.equal(selfCostDestination(effect, 'graveyard'), 'banished')
+  assert.equal(selfCostDestination(effect, 'hand'), null)
+  assert.deepEqual(effectTargetRequirement(effect), {
+    action: 'send',
+    count: 1,
+    min: 1,
+    max: 1,
+    family: 'Centur-Ion',
+    kind: 'card',
+    sources: ['deck'],
+    excludedNames: ['Wake Up Centur-Ion!'],
+  })
 })
 
 test('a hand effect that says Special Summon this card moves its source, not another monster', () => {

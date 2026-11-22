@@ -29,6 +29,27 @@ class YugiohServiceTest {
             yugiohService, repository, cardReferenceDataService);
 
     @Test
+    void deckToGraveyardFamilyEffectsOfferEveryLegalFamilyCardAndKeepTheirDestination() {
+        String effect = "During your Main Phase: You can banish this card from your GY; send 1 \"Centur-Ion\" "
+                + "card from your Deck to the GY, except \"Wake Up Centur-Ion!\".";
+        Card wakeUp = card(1, "Wake Up Centur-Ion!", effect, "Quick-Play Spell Card", "Centur-Ion");
+        Card atrii = card(2, "Centur-Ion Atrii", "A tuner.", "Tuner Monster", "Centur-Ion");
+        Card primera = card(3, "Centur-Ion Primera", "A tuner.", "Tuner Monster", "Centur-Ion");
+        Card bonds = card(4, "Centur-Ion Bonds", "A Quick-Play Spell.", "Quick-Play Spell Card", "Centur-Ion");
+        when(repository.getCardByName(wakeUp.getName())).thenReturn(wakeUp);
+        when(repository.findByArchetypeContainingIgnoreCase("Centur-Ion"))
+                .thenReturn(List.of(wakeUp, atrii, primera, bonds));
+
+        List<ComboService.ComboOption> options = service.getPossibleCombos(
+                wakeUp.getName(), "graveyard", effect);
+
+        assertEquals(Set.of(atrii.getName(), primera.getName(), bonds.getName()), options.stream()
+                .map(option -> option.card().getName())
+                .collect(java.util.stream.Collectors.toSet()));
+        assertTrue(options.stream().allMatch(option -> option.destination().equals("Graveyard")));
+    }
+
+    @Test
     void effectPrerequisitesRequireDiscardCostBeforeActivation() {
         String effect = "If this card is Fusion Summoned: You can discard 1 card; Fusion Summon 1 Level 8 or lower Fusion Monster.";
         Card lubellion = card(1, "Lubellion the Searing Dragon", effect, "Fusion Monster", "Branded");

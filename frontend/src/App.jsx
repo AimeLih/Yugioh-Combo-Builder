@@ -13,8 +13,10 @@ import {
   isFieldSpell,
   isSpellTrapCard,
   placeFieldSpell,
+  selfCostDestination,
   specialSummonsSelfFromZone,
   spellTrapResolutionZone,
+  tokenSummonRequirement,
 } from './effectResolution.js'
 import { isPassiveEffectText, splitCardEffects } from './effectParsing.js'
 import {
@@ -1350,10 +1352,12 @@ function EffectResolutionPicker({ request, hand, onConfirm, onCancel }) {
   const [selectedSearchIds, setSelectedSearchIds] = useState([])
   const [selectedTargetKeys, setSelectedTargetKeys] = useState([])
   const [discardChoices, setDiscardChoices] = useState([])
+  const [declaredTokenLevel, setDeclaredTokenLevel] = useState(null)
   useEffect(() => {
     setSelectedSearchIds([])
     setSelectedTargetKeys([])
     setDiscardChoices([])
+    setDeclaredTokenLevel(null)
   }, [request?.effect.text])
   if (!request) return null
 
@@ -1364,6 +1368,7 @@ function EffectResolutionPicker({ request, hand, onConfirm, onCancel }) {
     searchCandidates,
     targetOptions,
     sourceEntryId,
+    tokenRequirement,
   } = request
   const selectedSearchCards = selectedSearchIds
       .map(id => searchCandidates.find(card => String(card.id) === String(id)))
@@ -1397,7 +1402,10 @@ function EffectResolutionPicker({ request, hand, onConfirm, onCancel }) {
     : []
   const allDiscardChoices = [...handChoices, ...searchedChoices, ...randomChoices]
   const discardComplete = !discardRequirement || discardChoices.length === discardRequirement.count
-  const complete = searchComplete && targetComplete && discardComplete
+  const tokenComplete = !tokenRequirement
+      || tokenRequirement.levelChoices.length === 0
+      || tokenRequirement.levelChoices.includes(declaredTokenLevel)
+  const complete = searchComplete && targetComplete && discardComplete && tokenComplete
 
   function addSearchCard(card) {
     setSelectedSearchIds(current => current.length >= searchRequirement.max
@@ -1437,6 +1445,27 @@ function EffectResolutionPicker({ request, hand, onConfirm, onCancel }) {
             </div>
             <button type="button" className="material-picker-close" onClick={onCancel}>Close</button>
           </div>
+
+          {tokenRequirement && (
+            <section className="effect-resolution-step">
+              <h4>Declare the Level for {tokenRequirement.name}</h4>
+              <p className="xyz-detach-copy">Choose one of the Levels printed by the effect before Special Summoning the Token.</p>
+              <div className="xyz-detach-options">
+                {(tokenRequirement.levelChoices.length > 0
+                  ? tokenRequirement.levelChoices
+                  : [tokenRequirement.level]).filter(Boolean).map(level => (
+                    <button
+                        key={level}
+                        type="button"
+                        className={`xyz-detach-option${declaredTokenLevel === level ? ' selected' : ''}`}
+                        onClick={() => setDeclaredTokenLevel(level)}
+                    >
+                      <span><strong>Level {level}</strong><small>{tokenRequirement.name}</small></span>
+                    </button>
+                ))}
+              </div>
+            </section>
+          )}
 
           {searchRequirement && (
             <section className="effect-resolution-step">
@@ -1549,11 +1578,11 @@ function EffectResolutionPicker({ request, hand, onConfirm, onCancel }) {
           )}
 
           <div className="xyz-detach-footer">
-            <span>{selectedSearchIds.length} searched · {selectedTargetKeys.length} targeted · {discardChoices.length} discarded</span>
+            <span>{tokenRequirement ? `Level ${declaredTokenLevel ?? '—'} declared · ` : ''}{selectedSearchIds.length} searched · {selectedTargetKeys.length} targeted · {discardChoices.length} discarded</span>
             <button
                 type="button"
                 disabled={!complete}
-                onClick={() => onConfirm({ selectedSearchIds, selectedTargetKeys, discardChoices })}
+                onClick={() => onConfirm({ selectedSearchIds, selectedTargetKeys, discardChoices, declaredTokenLevel })}
             >
               Resolve Effect
             </button>
@@ -4079,11 +4108,12 @@ export default function App() {
       coinTossResolution,
   ) {
     const searchRequirement = effectSearchRequirement(effect.text)
+    const tokenRequirement = tokenSummonRequirement(effect.text)
     const targetRequirement = searchRequirement || hasOpenDeckCardCost(effect.text)
       ? null
       : effectTargetRequirement(effect.text)
     const discardRequirement = genericDiscardRequirement(effect.text)
-    if (!searchRequirement && !targetRequirement && !discardRequirement) return null
+    if (!searchRequirement && !targetRequirement && !discardRequirement && !tokenRequirement) return null
 
     let searchCandidates = []
     if (searchRequirement) {
@@ -4163,6 +4193,7 @@ export default function App() {
       discardRequirement,
       searchCandidates,
       targetOptions,
+      tokenRequirement,
     }
   }
 
@@ -4197,6 +4228,19 @@ export default function App() {
         overlayMaterials: [],
       }
     })
+    const preparedTokenEntries = request.tokenRequirement
+      ? Array.from({ length: request.tokenRequirement.count }, (_, index) => zoneEntry({
+          id: `token:${request.tokenRequirement.name}:${Date.now()}:${index}`,
+          name: request.tokenRequirement.name,
+          type: 'Token Monster',
+          race: request.tokenRequirement.race,
+          attribute: request.tokenRequirement.attribute,
+          atk: request.tokenRequirement.atk,
+          def: request.tokenRequirement.def,
+          level: selection.declaredTokenLevel ?? request.tokenRequirement.level,
+          description: 'Token created by a card effect.',
+        }, 'effect-token-summon'))
+      : []
 
     setZones(prev => {
       const next = Object.fromEntries(ZONE_KEYS.map(zoneName => [zoneName, [...prev[zoneName]]]))
@@ -4237,6 +4281,10 @@ export default function App() {
           description: 'Generic non-Effect Monster used as discard filler.',
         }, 'discard'))
       }
+
+      preparedTokenEntries.forEach(tokenEntry => {
+        next.monsterZone.push(assignZoneSlot(next, 'monsterZone', tokenEntry))
+      })
 
       selectedTargetOptions.forEach((option, optionIndex) => {
         if (option.originEntryId && ZONE_KEYS.includes(option.originZone)) {
@@ -4404,6 +4452,7 @@ export default function App() {
       const selectedSearchIds = selection.selectedSearchIds || []
       const selectedTargetKeys = selection.selectedTargetKeys || []
       const discardChoices = selection.discardChoices || []
+      const declaredTokenLevel = selection.declaredTokenLevel ?? null
       const validSearchIds = new Set(request.searchCandidates.map(card => String(card.id)))
       const validTargetKeys = new Set(request.targetOptions.map(option => option.selectionKey))
       const validHandIds = new Set(zones.hand
@@ -4426,6 +4475,9 @@ export default function App() {
               const index = Number(choice.slice('searched:'.length))
               return Number.isInteger(index) && index >= 0 && index < selectedSearchIds.length
             })
+      const tokenChoiceValid = !request.tokenRequirement
+          || request.tokenRequirement.levelChoices.length === 0
+          || request.tokenRequirement.levelChoices.includes(declaredTokenLevel)
       const chosenTargets = selectedTargetKeys
           .map(key => request.targetOptions.find(option => option.selectionKey === key))
           .filter(Boolean)
@@ -4433,12 +4485,13 @@ export default function App() {
       const requiredSpellTrapSlots = targetDestinations.filter(zoneName => zoneName === 'spellTrapZone').length
           + Number(placesSelfAsContinuousTrap)
       const targetCapacityValid = requiredSpellTrapSlots <= openSpellTrapSlots(zones).length
-          && targetDestinations.filter(zoneName => zoneName === 'monsterZone').length <= openMainMonsterSlots(zones).length
+          && targetDestinations.filter(zoneName => zoneName === 'monsterZone').length
+              + (request.tokenRequirement?.count || 0) <= openMainMonsterSlots(zones).length
           && targetDestinations.filter(zoneName => zoneName === 'pendulumZone').length <= openPendulumSlots(zones).length
       const targetOriginsValid = chosenTargets.every(option => !option.originEntryId
           || ZONE_KEYS.includes(option.originZone)
             && zones[option.originZone].some(entry => entry.instanceId === option.originEntryId))
-      if (!searchCountValid || !targetCountValid || !discardCountValid
+      if (!searchCountValid || !targetCountValid || !discardCountValid || !tokenChoiceValid
           || new Set(discardChoices).size !== discardChoices.length
           || !targetCapacityValid || !targetOriginsValid) {
         setError('Choose the printed number of legal cards and make sure their destination zones are open.')
@@ -4503,6 +4556,7 @@ export default function App() {
     let resolvedZone = zone
     let summonedEntry = null
     const directDeckCost = hasOpenDeckCardCost(effect.text)
+    const selfCostZone = selfCostDestination(effect.text, zone)
     const paysSelfTribute = Boolean(entry
         && ['monsterZone', 'extraMonsterZone'].includes(zone)
         && /\btribute this card\b/i.test(effect.text))
@@ -4524,6 +4578,23 @@ export default function App() {
       resolvedZone = isTokenCard(entry.card) ? null : 'graveyard'
       setSelectedEntry(isTokenCard(entry.card) ? null : tributedEntry)
       if (xyzMaterialsEntryId === entry.instanceId) closeXyzMaterials()
+    } else if (entry && selfCostZone) {
+      const movedEntry = {
+        ...entry,
+        moveReason: 'effect-cost',
+        treatedAs: null,
+        overlayMaterials: [],
+      }
+      setZones(prev => {
+        const next = Object.fromEntries(ZONE_KEYS.map(zoneName => [
+          zoneName,
+          prev[zoneName].filter(candidate => candidate.instanceId !== entry.instanceId),
+        ]))
+        next[selfCostZone].push(movedEntry)
+        return next
+      })
+      resolvedZone = selfCostZone
+      setSelectedEntry(movedEntry)
     } else if (placesSelfAsContinuousTrap) {
       const released = releaseXyzMaterials(entry)
       const continuousTrapEntry = {
@@ -4978,6 +5049,7 @@ export default function App() {
           <div>© 2026 Aime Lihono. All rights reserved.</div>
           <div>
             Third-party names, trademarks, card data, and artwork—including Yu-Gi-Oh! materials—remain the property of their respective owners.
+            This site is not endorsed by or affiliated with Yu-Gi-Oh!.
           </div>
         </footer>
         <MaterialPicker

@@ -100,6 +100,43 @@ export function effectTargetRequirement(effectText) {
   }
 }
 
+export function tokenSummonRequirement(effectText) {
+  const text = effectText || ''
+  const summon = text.match(
+      /\bspecial summon\s+(?:up to\s+)?(\d+|a|an|one|two|three|four|five)\s+"([^"]+ tokens?)"(?:\s*\(([^)]*)\))?/i,
+  )
+  if (!summon) return null
+
+  const details = summon[3] || ''
+  const declaredLevels = text.match(/\bdeclare\s+Level\s+((?:\d+\s*(?:,|or|and)\s*)+\d+)/i)?.[1] || ''
+  const levelChoices = [...declaredLevels.matchAll(/\d+/g)].map(match => Number(match[0]))
+  const printedLevel = details.match(/\bLevel\s+(\d+)\b/i)?.[1]
+  const race = details.split('/').map(part => part.trim()).find(part =>
+    part && !/^(?:dark|divine|earth|fire|light|water|wind|level\s+\d+|atk\s+\d+|def\s+\d+|tuner)$/i.test(part)) || ''
+
+  return {
+    count: effectNumber(summon[1]),
+    name: summon[2],
+    race,
+    attribute: details.match(/\b(DARK|DIVINE|EARTH|FIRE|LIGHT|WATER|WIND)\b/i)?.[1]?.toUpperCase() || '',
+    atk: Number(details.match(/\bATK\s+(\d+)\b/i)?.[1] ?? 0),
+    def: Number(details.match(/\bDEF\s+(\d+)\b/i)?.[1] ?? 0),
+    level: printedLevel ? Number(printedLevel) : null,
+    levelChoices,
+  }
+}
+
+export function selfCostDestination(effectText, sourceZone) {
+  const text = effectText || ''
+  if (!text.includes(';')) return null
+  const costClause = text.split(';', 1)[0]
+  if (sourceZone === 'graveyard'
+      && /\bbanish this card(?:\s+from\s+(?:your|the)\s+(?:GY|Graveyard))?\b/i.test(costClause)) {
+    return 'banished'
+  }
+  return null
+}
+
 export function isEffectSearchCandidate(card, requirement) {
   if (!card || !requirement) return false
   const type = (card.type || '').toLowerCase()

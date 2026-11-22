@@ -6,7 +6,6 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Map;
 
-/** Application service for combo discovery. */
 @Service
 public class ComboService {
 
