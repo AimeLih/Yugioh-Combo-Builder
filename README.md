@@ -141,4 +141,4 @@ Copyright © 2026 Aime Lihono. All rights reserved.
 
 This project is publicly viewable for portfolio purposes. Copying,
 redistribution, deployment, or creation of derivative works is not
-permitted without written authorization. See [LICENSE](LICENSE).
+permitted without written authorization. See [[LICENSE](https://github.com/AimeLih/Yugioh-Combo-Builder/blob/master/LICENSE.MD)].
